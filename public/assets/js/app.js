@@ -37,27 +37,37 @@
       return;
     }
 
-    if (hasCart()) {
-      await withLoading("도서 목록을 불러오는 중입니다.", () => loadBooks());
-      updateCart();
+    if (pageName === "catalog") {
+      await withLoading("도서 목록을 불러오는 중입니다.", async () => {
+        await loadBooks();
+        updateCart();
+        bindCatalog();
+        renderCategories();
+        await refreshPending(false);
+        filterBooks();
+      });
+      return;
     }
 
-    if (pageName === "catalog") {
-      bindCatalog();
-      renderCategories();
-      await refreshPending(false);
-      filterBooks();
+    if (hasCart()) {
+      await withLoading("도서 정보를 준비하는 중입니다.", async () => {
+        await loadBooks();
+        updateCart();
+      });
     }
 
     if (pageName === "detail") {
       bindDetailPage();
-      await refreshPending(false);
-      renderDetailPage();
+      await withLoading("도서 정보를 불러오는 중입니다.", async () => {
+        await refreshPending(false);
+        renderDetailPage();
+      });
+      return;
     }
 
     if (pageName === "status") {
       bindStatus();
-      await loadMyRequests();
+      await withLoading("신청 진행상황을 불러오는 중입니다.", () => loadMyRequests(false));
     }
   }
 
@@ -151,7 +161,7 @@
             <p>부민도서관 : 49236 부산광역시 서구 구덕로 225(부민동 2가) Tel. 051-200-8434 / Fax. 051-200-8435</p>
             <p>법학도서분관 : 49236 부산광역시 서구 구덕로 225(부민동 2가) Tel. 051-200-8441 / Fax. 051-200-8443</p>
             <p>의학도서분관 : 49201 부산광역시 서구 대신공원로 32(동대신동 3가) Tel. 051-240-2938 / Fax. 051-240-2666</p>
-            <p>Copyright Dong-A University Library. All Rights Reserved.</p>
+            <p>Dong-A University Library. SEOK JAE WOO 051-200-6275</p>
           </div>
         </div>
       </footer>
@@ -577,6 +587,7 @@
     };
     const button = els.applyForm.querySelector('button[type="submit"]');
     button.disabled = true;
+    button.dataset.loading = "true";
     setButtonLoading(button, "신청 접수 중입니다.");
     showLoading("신청을 접수하는 중입니다.");
     try {
@@ -659,6 +670,7 @@
         action: "cancelApplication",
         requestId,
         studentId: state.user.studentId,
+        studentName: state.user.studentName || "",
         phone: state.user.phone,
       });
       if (!result.ok) throw new Error(appErrorMessage(result.message || "신청을 취소하지 못했습니다."));

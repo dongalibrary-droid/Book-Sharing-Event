@@ -90,7 +90,7 @@ function loginUser_(payload) {
         if (String(values[index][0]) === studentId) {
           const row = index + 2;
           sheet.getRange(row, 2, 1, 6).setValues([[studentName, phone, "Y", values[index][4] || now, now, Number(values[index][6] || 0) + 1]]);
-          return { ok: true, user: { studentId: studentId, studentName: studentName, phone: phone }, entries: readMyRequests_({ studentId: studentId, phone: phone }) };
+          return { ok: true, user: { studentId: studentId, studentName: studentName, phone: phone }, entries: readMyRequests_({ studentId: studentId, studentName: studentName, phone: phone }) };
         }
       }
     }
@@ -146,6 +146,7 @@ function cancelApplication_(payload) {
   const requestId = requireText_(payload.requestId, "신청ID");
   const studentId = requireText_(payload.studentId, "학번");
   const phone = normalizePhone_(requireText_(payload.phone, "휴대폰번호"));
+  const studentName = String(payload.studentName || "").trim();
   const sheet = getSpreadsheet_().getSheetByName(CONFIG.REQUEST_SHEET_NAME);
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) throw new Error("신청내역을 찾을 수 없습니다.");
@@ -155,7 +156,7 @@ function cancelApplication_(payload) {
   for (let index = 1; index < values.length; index += 1) {
     const row = values[index];
     if (cell_(row, indexes, "신청ID") !== requestId) continue;
-    if (cell_(row, indexes, "학번") !== studentId || normalizePhone_(cell_(row, indexes, "연락처")) !== phone) throw new Error("본인 신청내역만 취소할 수 있습니다.");
+    if (!isSameApplicant_(row, indexes, studentId, phone, studentName)) throw new Error("본인 신청내역만 취소할 수 있습니다.");
     const status = cell_(row, indexes, "상태");
     if (status !== "신청접수" && status !== "처리중") throw new Error("현재 상태에서는 취소할 수 없습니다.");
     sheet.getRange(index + 1, indexes["상태"] + 1).setValue("취소");
@@ -178,10 +179,7 @@ function readMyRequests_(params) {
   const entries = [];
   for (let index = values.length - 1; index >= 1; index -= 1) {
     const row = values[index];
-    if (cell_(row, indexes, "학번") !== studentId) continue;
-    const rowPhone = normalizePhone_(cell_(row, indexes, "연락처"));
-    const rowName = cell_(row, indexes, "학생명");
-    if (rowPhone && rowPhone !== phone && rowName !== studentName) continue;
+    if (!isSameApplicant_(row, indexes, studentId, phone, studentName)) continue;
     entries.push({
       requestId: cell_(row, indexes, "신청ID"),
       requestedAt: cell_(row, indexes, "신청일시"),
@@ -194,6 +192,14 @@ function readMyRequests_(params) {
     });
   }
   return entries;
+}
+
+function isSameApplicant_(row, indexes, studentId, phone, studentName) {
+  if (cell_(row, indexes, "학번") !== studentId) return false;
+  const rowPhone = normalizePhone_(cell_(row, indexes, "연락처"));
+  if (!rowPhone || rowPhone === phone) return true;
+  const rowName = cell_(row, indexes, "학생명");
+  return Boolean(studentName && rowName === studentName);
 }
 
 function readBooks_() {
