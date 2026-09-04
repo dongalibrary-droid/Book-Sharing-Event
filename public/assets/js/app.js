@@ -11,6 +11,8 @@
     perPage: 25,
     selectedBooks: [],
     activeBook: null,
+    myRequests: [],
+    selectedRequestIds: new Set(),
     coverCache: loadJson("careerBookCoverCache", {}),
     cart: loadJson("careerBookCart", []),
     user: loadJson("careerBookUser", null),
@@ -43,32 +45,33 @@
         updateCart();
         bindCatalog();
         renderCategories();
-        await refreshPending(false);
         filterBooks();
       });
+      refreshPending(false);
       return;
-    }
-
-    if (hasCart()) {
-      await withLoading("도서 정보를 준비하는 중입니다.", async () => {
-        await loadBooks();
-        updateCart();
-      });
     }
 
     if (pageName === "detail") {
       bindDetailPage();
       await withLoading("도서 정보를 불러오는 중입니다.", async () => {
-        await refreshPending(false);
+        await loadBooks();
+        updateCart();
+        renderDetailPage();
+      });
+      refreshPending(false).then(() => {
         renderDetailPage();
       });
       return;
     }
 
     if (pageName === "status") {
+      updateCart();
       bindStatus();
       await withLoading("신청 진행상황을 불러오는 중입니다.", () => loadMyRequests(false));
+      return;
     }
+
+    if (hasCart()) updateCart();
   }
 
   function ensureSharedUi() {
@@ -172,12 +175,13 @@
     [
       "authArea", "toast", "loginForm", "totalBooks", "availableBooks", "cartBooks",
       "navCartCount", "floatCartCount", "searchInput", "sortSelect", "categoryList",
-      "resetFilters", "availableOnly", "hidePending", "resultCount", "refreshLive",
+      "filterToggle", "resetFilters", "availableOnly", "hidePending", "resultCount", "refreshLive",
       "bookResults", "pagerTop", "pager", "cartDrawer", "cartItems", "clearCart", "applyCart",
       "bookModal", "detailCover", "detailCategory", "detailTitle", "detailAuthor",
       "detailMeta", "detailDescription", "detailApply", "detailCart", "detailPage",
       "detailCatalog", "applyModal", "applyForm", "applySummary", "myRequestCount",
-      "myRequests", "refreshMine", "pageDetailCover", "pageDetailCategory",
+      "myRequests", "refreshMine", "bulkActions", "selectAllRequests", "requestSelectionCount",
+      "bulkCancelSelected", "pageDetailCover", "pageDetailCategory",
       "pageDetailTitle", "pageDetailAuthor", "pageDetailMeta", "pageDetailDescription",
       "pageDetailApply", "pageDetailCart", "pageRegistrationNo", "pageCallNo",
       "pageLocation", "pageCatalogLink"
@@ -235,6 +239,16 @@
   }
 
   function bindCatalog() {
+    if (els.filterToggle) {
+      els.filterToggle.addEventListener("click", () => {
+        const filters = $("catalogFilters");
+        if (!filters) return;
+        const open = !filters.classList.contains("open");
+        filters.classList.toggle("open", open);
+        els.filterToggle.setAttribute("aria-expanded", String(open));
+        els.filterToggle.innerHTML = `<i class="fa-solid fa-sliders"></i> ${open ? "필터 및 카테고리 닫기" : "필터 및 카테고리 열기"}`;
+      });
+    }
     els.searchInput.addEventListener("input", debounce(() => {
       state.page = 1;
       filterBooks();
@@ -278,6 +292,17 @@
 
   function bindStatus() {
     if (els.refreshMine) els.refreshMine.addEventListener("click", () => loadMyRequests(true));
+    if (els.selectAllRequests) {
+      els.selectAllRequests.addEventListener("change", () => {
+        state.selectedRequestIds = new Set(
+          els.selectAllRequests.checked
+            ? state.myRequests.filter((entry) => canCancelRequest(entry)).map((entry) => entry.requestId)
+            : []
+        );
+        renderMyRequests(state.myRequests);
+      });
+    }
+    if (els.bulkCancelSelected) els.bulkCancelSelected.addEventListener("click", bulkCancelRequests);
   }
 
   async function login(event) {
@@ -533,10 +558,16 @@
 
   function updateCart() {
     const books = state.cart.map(findBook).filter(Boolean);
-    if (els.cartBooks) els.cartBooks.textContent = fmt(books.length);
-    document.querySelectorAll("#navCartCount").forEach((item) => { item.textContent = fmt(books.length); });
-    if (els.floatCartCount) els.floatCartCount.textContent = fmt(books.length);
+    const count = state.books.length ? books.length : state.cart.length;
+    if (els.cartBooks) els.cartBooks.textContent = fmt(count);
+    document.querySelectorAll("#navCartCount").forEach((item) => { item.textContent = fmt(count); });
+    if (els.floatCartCount) els.floatCartCount.textContent = fmt(count);
     if (!els.cartItems) return;
+    if (!state.books.length && state.cart.length) {
+      els.cartItems.innerHTML = loadingBlock("장바구니 정보를 불러오는 중입니다.");
+      els.applyCart.disabled = true;
+      return;
+    }
     els.cartItems.innerHTML = books.length ? books.map((book) => (
       `<div class="cart-item">
         <div><strong>${html(book.title)}</strong><span>${html(book.registrationNo)} · ${html(book.author || "")}</span></div>
@@ -613,12 +644,18 @@
   async function loadMyRequests(manual) {
     if (!els.myRequests) return;
     if (!state.user) {
+      state.myRequests = [];
+      state.selectedRequestIds = new Set();
       els.myRequestCount.textContent = "0";
       els.myRequests.innerHTML = `<div class="empty-state"><strong>로그인이 필요합니다.</strong><p>학생 로그인 후 신청 진행상황을 확인할 수 있습니다.</p><a class="primary" href="index.html">로그인하기</a></div>`;
+      updateBulkActions();
       return;
     }
     if (!config.appsScriptUrl) {
+      state.myRequests = [];
+      state.selectedRequestIds = new Set();
       els.myRequests.innerHTML = `<p class="empty">신청 내역을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</p>`;
+      updateBulkActions();
       return;
     }
     els.myRequests.innerHTML = loadingBlock("신청 내역을 불러오는 중입니다.");
@@ -632,12 +669,17 @@
         phone: state.user.phone
       });
       const entries = payload.entries || [];
+      state.myRequests = entries;
+      state.selectedRequestIds = new Set(Array.from(state.selectedRequestIds).filter((id) => entries.some((entry) => entry.requestId === id && canCancelRequest(entry))));
       els.myRequestCount.textContent = fmt(entries.length);
       renderMyRequests(entries);
       if (manual) toast("신청내역을 새로 확인했습니다.");
     } catch (error) {
+      state.myRequests = [];
+      state.selectedRequestIds = new Set();
       els.myRequestCount.textContent = "0";
       els.myRequests.innerHTML = `<p class="empty">신청 내역을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</p>`;
+      updateBulkActions();
     } finally {
       if (manual) hideLoading();
     }
@@ -645,20 +687,34 @@
 
   function renderMyRequests(entries) {
     els.myRequests.innerHTML = entries.length ? entries.map((entry) => {
-      const cancellable = entry.status === "신청접수" || entry.status === "처리중";
-      return `<article class="request-card">
+      const cancellable = canCancelRequest(entry);
+      const checked = state.selectedRequestIds.has(entry.requestId);
+      return `<article class="request-card${cancellable ? " has-select" : ""}">
+        ${cancellable ? `<input class="request-check" type="checkbox" data-request-check="${attr(entry.requestId)}" aria-label="${attr(entry.title || entry.bookId)} 선택" ${checked ? "checked" : ""} />` : ""}
         <div>
           <span class="status ${statusClass(entry.status)}">${html(entry.status)}</span>
           <h3>${html(entry.title || entry.bookId)}</h3>
           <p>${html(entry.registrationNo || "")} · ${html(entry.author || "저자 정보 없음")}</p>
           <small>${html(entry.requestedAt || "")}</small>
         </div>
-        <button type="button" class="ghost danger" data-cancel-request="${attr(entry.requestId)}" ${cancellable ? "" : "disabled"}>신청 취소</button>
+        <button type="button" class="ghost danger request-cancel" data-cancel-request="${attr(entry.requestId)}" ${cancellable ? "" : "disabled"}>신청 취소</button>
       </article>`;
     }).join("") : `<div class="empty-state"><strong>아직 신청한 도서가 없습니다.</strong><p>도서목록에서 원하는 책을 신청해보세요.</p><a class="primary" href="catalog.html">도서목록 보기</a></div>`;
+    els.myRequests.querySelectorAll("[data-request-check]").forEach((checkbox) => {
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) state.selectedRequestIds.add(checkbox.dataset.requestCheck);
+        else state.selectedRequestIds.delete(checkbox.dataset.requestCheck);
+        updateBulkActions();
+      });
+    });
     els.myRequests.querySelectorAll("[data-cancel-request]").forEach((button) => {
       button.addEventListener("click", () => cancelRequest(button.dataset.cancelRequest));
     });
+    updateBulkActions();
+  }
+
+  function canCancelRequest(entry) {
+    return entry && (entry.status === "신청접수" || entry.status === "처리중");
   }
 
   async function cancelRequest(requestId) {
@@ -680,6 +736,60 @@
       toast(appErrorMessage(error.message || "신청을 취소하지 못했습니다."));
     } finally {
       hideLoading();
+    }
+  }
+
+  async function bulkCancelRequests() {
+    if (!state.user) return toast("로그인 후 신청을 취소할 수 있습니다.");
+    const selected = state.myRequests.filter((entry) => state.selectedRequestIds.has(entry.requestId) && canCancelRequest(entry));
+    if (!selected.length) return toast("취소할 신청내역을 선택해주세요.");
+    if (!window.confirm(`선택한 ${selected.length}건의 신청을 취소할까요?`)) return;
+
+    if (els.bulkCancelSelected) {
+      els.bulkCancelSelected.disabled = true;
+      els.bulkCancelSelected.dataset.loading = "true";
+      setButtonLoading(els.bulkCancelSelected, "취소 처리 중입니다.");
+    }
+    showLoading("선택한 신청을 취소하는 중입니다.");
+    let successCount = 0;
+    try {
+      for (let index = 0; index < selected.length; index += 1) {
+        const result = await postToSheet({
+          action: "cancelApplication",
+          requestId: selected[index].requestId,
+          studentId: state.user.studentId,
+          studentName: state.user.studentName || "",
+          phone: state.user.phone,
+        });
+        if (!result.ok) throw new Error(appErrorMessage(result.message || "선택 신청을 취소하지 못했습니다."));
+        successCount += 1;
+      }
+      state.selectedRequestIds = new Set();
+      toast(`${successCount}건의 신청이 취소되었습니다.`);
+      await loadMyRequests(false);
+    } catch (error) {
+      toast(appErrorMessage(error.message || "선택 신청을 취소하지 못했습니다."));
+      await loadMyRequests(false);
+    } finally {
+      hideLoading();
+      if (els.bulkCancelSelected) {
+        delete els.bulkCancelSelected.dataset.loading;
+        setButtonLoading(els.bulkCancelSelected, "선택 신청 취소");
+      }
+      updateBulkActions();
+    }
+  }
+
+  function updateBulkActions() {
+    if (!els.bulkActions) return;
+    const cancellableIds = state.myRequests.filter(canCancelRequest).map((entry) => entry.requestId);
+    const selectedCount = cancellableIds.filter((id) => state.selectedRequestIds.has(id)).length;
+    els.bulkActions.hidden = cancellableIds.length === 0;
+    if (els.requestSelectionCount) els.requestSelectionCount.textContent = `${selectedCount}건 선택`;
+    if (els.bulkCancelSelected) els.bulkCancelSelected.disabled = selectedCount === 0;
+    if (els.selectAllRequests) {
+      els.selectAllRequests.checked = cancellableIds.length > 0 && selectedCount === cancellableIds.length;
+      els.selectAllRequests.indeterminate = selectedCount > 0 && selectedCount < cancellableIds.length;
     }
   }
 
@@ -790,7 +900,17 @@
     return available(book) && !state.pendingIds.has(book.bookId);
   }
 
-  function openCart() {
+  async function openCart() {
+    if (!state.books.length) {
+      showLoading("장바구니 정보를 불러오는 중입니다.");
+      try {
+        await loadBooks();
+      } catch (error) {
+        toast("장바구니 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.");
+      } finally {
+        hideLoading();
+      }
+    }
     updateCart();
     openLayer(els.cartDrawer);
   }

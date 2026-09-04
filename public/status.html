@@ -10,13 +10,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/styles.css?v=20260904-2" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=20260904-3" />
 </head>
 <body data-page="status">
   <script>
     window.CAREER_BOOKS_CONFIG = {
       appsScriptUrl: "https://script.google.com/macros/s/AKfycbxQrpdAeaKGvu-27715evDBXFt12FP6ooytHYzLt1wN_pWMdPyy47GGPgZQwESDbD7X/exec",
-      dataUrl: "assets/data/career-books.json?v=20260904-2"
+      dataUrl: "assets/data/career-books.json?v=20260904-3"
     };
   </script>
   <header class="site-header">
@@ -44,10 +44,15 @@
     </section>
     <section class="my-status-panel">
       <div class="result-head"><div><strong id="myRequestCount">0</strong>건의 신청내역</div><button type="button" class="outline" id="refreshMine"><i class="fa-solid fa-rotate"></i> 새로고침</button></div>
+      <div class="bulk-actions" id="bulkActions" hidden>
+        <label><input type="checkbox" id="selectAllRequests" /> 전체 선택</label>
+        <span id="requestSelectionCount">0건 선택</span>
+        <button type="button" class="ghost danger" id="bulkCancelSelected" disabled><i class="fa-solid fa-xmark"></i> 선택 신청 취소</button>
+      </div>
       <div id="myRequests" class="request-list"></div>
     </section>
   </main>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="assets/js/app.js?v=20260904-2"></script>
+  <script src="assets/js/app.js?v=20260904-3"></script>
 </body>
 </html>

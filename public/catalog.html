@@ -10,13 +10,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/styles.css?v=20260904-2" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=20260904-3" />
 </head>
 <body data-page="catalog">
   <script>
     window.CAREER_BOOKS_CONFIG = {
       appsScriptUrl: "https://script.google.com/macros/s/AKfycbxQrpdAeaKGvu-27715evDBXFt12FP6ooytHYzLt1wN_pWMdPyy47GGPgZQwESDbD7X/exec",
-      dataUrl: "assets/data/career-books.json?v=20260904-2"
+      dataUrl: "assets/data/career-books.json?v=20260904-3"
     };
   </script>
   <header class="site-header">
@@ -58,7 +58,10 @@
       <button type="button" class="icon-button" data-view="grid" aria-label="격자형"><i class="fa-solid fa-table-cells-large"></i></button>
     </section>
     <section class="layout">
-      <aside class="filters">
+      <button type="button" class="filter-toggle" id="filterToggle" aria-expanded="false" aria-controls="catalogFilters">
+        <i class="fa-solid fa-sliders"></i> 필터 및 카테고리 열기
+      </button>
+      <aside class="filters" id="catalogFilters">
         <div class="filter-options">
           <label><input type="checkbox" id="availableOnly" /> 신청 가능한 책만</label>
           <label><input type="checkbox" id="hidePending" /> 신청 진행중 제외</label>
@@ -111,6 +114,6 @@
     </form>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="assets/js/app.js?v=20260904-2"></script>
+  <script src="assets/js/app.js?v=20260904-3"></script>
 </body>
 </html>
