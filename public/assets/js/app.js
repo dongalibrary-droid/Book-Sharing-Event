@@ -10,6 +10,7 @@
     FOOTER_DESCRIPTION: "동아대학교 도서관도 함께 길을 물으며 설립자의 교육철학 이념을 따릅니다.",
   };
   const pageName = document.body.dataset.page || "catalog";
+  const cachedSiteSettings = loadJson("careerBookSiteSettings", null);
   const state = {
     books: [],
     filtered: [],
@@ -22,7 +23,7 @@
     activeBook: null,
     myRequests: [],
     selectedRequestIds: new Set(),
-    siteSettings: { ...siteDefaults },
+    siteSettings: { ...siteDefaults, ...(cachedSiteSettings || {}) },
     coverCache: loadJson("careerBookCoverCache", {}),
     cart: loadJson("careerBookCart", []),
     user: loadJson("careerBookUser", null),
@@ -40,6 +41,7 @@
     renderAuth();
     bindCommon();
     applySiteSettings();
+    if (cachedSiteSettings) releaseSettingText();
     loadSiteSettings();
 
     if (pageName === "login") {
@@ -251,14 +253,20 @@
   }
 
   async function loadSiteSettings() {
-    if (!config.appsScriptUrl) return;
+    if (!config.appsScriptUrl) {
+      releaseSettingText();
+      return;
+    }
     try {
       const payload = await getFromSheet({ action: "settings" });
       if (!payload.ok || !payload.settings) return;
       state.siteSettings = { ...state.siteSettings, ...payload.settings };
+      saveJson("careerBookSiteSettings", state.siteSettings);
       applySiteSettings();
     } catch (error) {
       // Settings are optional; the static defaults keep the site usable.
+    } finally {
+      releaseSettingText();
     }
   }
 
@@ -274,6 +282,10 @@
     if (pageName === "status") document.title = `신청 진행상황 | ${siteTitle}`;
     if (pageName === "guide") document.title = `이용안내 | ${siteTitle}`;
     if (pageName === "detail" && !state.activeBook) document.title = `도서 상세 | ${siteTitle}`;
+  }
+
+  function releaseSettingText() {
+    document.body.classList.remove("settings-pending");
   }
 
   function bindLogin() {
