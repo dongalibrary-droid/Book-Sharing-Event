@@ -115,6 +115,7 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .pager button.active { color: #fff; background: var(--blue); border-color: var(--blue); }
 .pager button:disabled { background: var(--soft); color: #94a3b8; opacity: 1; }
 .pager-gap { min-width: 24px; height: 38px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+.pager-current { height: 38px; min-width: 76px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--soft); color: var(--blue); font-weight: 800; white-space: nowrap; }
 .pending, .guide { margin-top: 48px; }
 .pending h2 { margin: 0 0 16px; font-size: 30px; }
 .pending-list { display: grid; gap: 10px; }
@@ -285,6 +286,10 @@ body.logged-in .floating-cart { display: inline-flex; align-items: center; justi
   .detail h2 { font-size: 24px; }
   .form-grid { grid-template-columns: 1fr; }
   .floating-cart { right: 16px; bottom: calc(18px + env(safe-area-inset-bottom)); width: 54px; height: 54px; }
+  .pager { flex-wrap: nowrap; justify-content: center; gap: 5px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+  .pager::-webkit-scrollbar { display: none; }
+  .pager button { flex: 0 0 auto; min-width: 0; height: 36px; padding: 0 10px; white-space: nowrap; font-size: 14px; }
+  .pager-current { flex: 0 0 auto; height: 36px; min-width: 72px; padding: 0 8px; font-size: 14px; }
   .footer-links { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); padding: 0 18px; }
   .footer-links a { min-height: 42px; padding: 0 10px; border-right: 0; border-bottom: 1px solid rgba(255,255,255,.1); font-size: 12px; }
   .footer-links a:first-child { padding-left: 10px; }
@@ -306,4 +311,7 @@ body.logged-in .floating-cart { display: inline-flex; align-items: center; justi
   .summary.compact span { font-size: 13px; }
   .toolbar { padding: 12px; }
   .search-box { min-height: 52px; gap: 10px; }
+  .pager { gap: 4px; }
+  .pager button { padding: 0 8px; font-size: 13px; }
+  .pager-current { min-width: 66px; padding: 0 6px; font-size: 13px; }
 }

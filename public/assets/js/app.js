@@ -532,6 +532,7 @@
   }
 
   function pagerHtml(pageCount) {
+    if (isCompactPager()) return compactPagerHtml(pageCount);
     const pages = new Set([1, pageCount]);
     for (let value = state.page - 2; value <= state.page + 2; value += 1) pages.add(value);
     const ordered = Array.from(pages).filter((value) => value >= 1 && value <= pageCount).sort((a, b) => a - b);
@@ -546,6 +547,20 @@
       <button type="button" data-page="${Math.min(pageCount, state.page + 1)}" ${state.page === pageCount ? "disabled" : ""}>다음</button>
       <button type="button" data-page="${pageCount}" ${state.page === pageCount ? "disabled" : ""}>끝</button>
     `;
+  }
+
+  function compactPagerHtml(pageCount) {
+    return `
+      <button type="button" data-page="1" ${state.page === 1 ? "disabled" : ""}>처음</button>
+      <button type="button" data-page="${Math.max(1, state.page - 1)}" ${state.page === 1 ? "disabled" : ""}>이전</button>
+      <span class="pager-current" aria-label="현재 페이지">${fmt(state.page)} / ${fmt(pageCount)}</span>
+      <button type="button" data-page="${Math.min(pageCount, state.page + 1)}" ${state.page === pageCount ? "disabled" : ""}>다음</button>
+      <button type="button" data-page="${pageCount}" ${state.page === pageCount ? "disabled" : ""}>끝</button>
+    `;
+  }
+
+  function isCompactPager() {
+    return window.matchMedia && window.matchMedia("(max-width: 640px)").matches;
   }
 
   async function openPreview(book) {
