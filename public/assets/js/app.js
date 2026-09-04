@@ -285,13 +285,13 @@
     try {
       if (config.appsScriptUrl) {
         const result = await postToSheet({ action: "login", ...user, privacyConsent: true });
-        if (!result.ok) throw new Error(result.message || "로그인하지 못했습니다.");
+        if (!result.ok) throw new Error(appErrorMessage(result.message || "로그인하지 못했습니다."));
       }
       state.user = user;
       saveJson("careerBookUser", user);
       location.href = "catalog.html";
     } catch (error) {
-      toast(error.message || "로그인 중 오류가 발생했습니다.");
+      toast(appErrorMessage(error.message || "로그인 중 오류가 발생했습니다."));
     } finally {
       button.disabled = false;
     }
@@ -549,7 +549,7 @@
     button.disabled = true;
     try {
       const result = await postToSheet(payload);
-      if (!result.ok) throw new Error(result.message || "신청 접수 실패");
+      if (!result.ok) throw new Error(appErrorMessage(result.message || "신청 접수 실패"));
       state.cart = state.cart.filter((id) => !state.selectedBooks.some((book) => book.bookId === id));
       saveJson("careerBookCart", state.cart);
       updateCart();
@@ -558,7 +558,7 @@
       toast("신청이 접수되었습니다.");
       await refreshPending(false);
     } catch (error) {
-      toast(error.message || "신청 접수 중 오류가 발생했습니다.");
+      toast(appErrorMessage(error.message || "신청 접수 중 오류가 발생했습니다."));
     } finally {
       button.disabled = false;
     }
@@ -614,11 +614,11 @@
         studentId: state.user.studentId,
         phone: state.user.phone,
       });
-      if (!result.ok) throw new Error(result.message || "신청을 취소하지 못했습니다.");
+      if (!result.ok) throw new Error(appErrorMessage(result.message || "신청을 취소하지 못했습니다."));
       toast("신청이 취소되었습니다.");
       await loadMyRequests(false);
     } catch (error) {
-      toast(error.message || "신청을 취소하지 못했습니다.");
+      toast(appErrorMessage(error.message || "신청을 취소하지 못했습니다."));
     }
   }
 
@@ -636,12 +636,22 @@
     const url = new URL(config.appsScriptUrl);
     Object.keys(params).forEach((key) => url.searchParams.set(key, params[key]));
     const response = await fetch(url.toString(), { cache: "no-store" });
+    if (!response.ok) throw new Error("서버 응답을 받지 못했습니다.");
     return response.json();
   }
 
   async function postToSheet(payload) {
     const response = await fetch(config.appsScriptUrl, { method: "POST", body: JSON.stringify(payload) });
+    if (!response.ok) throw new Error("서버 응답을 받지 못했습니다.");
     return response.json();
+  }
+
+  function appErrorMessage(message) {
+    const text = String(message || "").trim();
+    if (/Illegal spreadsheet id or key/i.test(text)) {
+      return "구글시트 연결 설정이 올바르지 않습니다. 담당자에게 SPREADSHEET_ID 확인을 요청해주세요.";
+    }
+    return text || "처리 중 오류가 발생했습니다.";
   }
 
   function cover(book) {

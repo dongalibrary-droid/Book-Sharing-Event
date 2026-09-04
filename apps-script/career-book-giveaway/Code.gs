@@ -16,16 +16,17 @@ const USER_HEADERS = ["학번", "성명", "휴대폰번호", "개인정보동의
 
 function doGet(e) {
   try {
-    ensureSheets_();
     const params = e.parameter || {};
     const action = String(params.action || "health");
+    if (action === "health") return json_({ ok: true, service: "Dong-A University Library Career Book Giveaway" });
+    if (action === "bookMeta") return json_({ ok: true, item: getBookMeta_(params) });
+    ensureSheets_();
     if (action === "books") return json_({ ok: true, books: readBooks_() });
     if (action === "pending") return json_({ ok: true, entries: readPendingRequests_() });
     if (action === "myRequests") return json_({ ok: true, entries: readMyRequests_(params) });
-    if (action === "bookMeta") return json_({ ok: true, item: getBookMeta_(params) });
-    return json_({ ok: true, service: "Dong-A University Library Career Book Giveaway" });
+    return json_({ ok: false, message: "지원하지 않는 요청입니다." });
   } catch (error) {
-    return json_({ ok: false, message: error.message || String(error) });
+    return json_({ ok: false, message: friendlyError_(error) });
   }
 }
 
@@ -38,7 +39,7 @@ function doPost(e) {
     if (payload.action === "cancelApplication") return json_(cancelApplication_(payload));
     throw new Error("지원하지 않는 요청입니다.");
   } catch (error) {
-    return json_({ ok: false, message: error.message || String(error) });
+    return json_({ ok: false, message: friendlyError_(error) });
   }
 }
 
@@ -53,6 +54,19 @@ function setAladinTtbKey() {
   if (response.getSelectedButton() !== ui.Button.OK) return;
   PropertiesService.getScriptProperties().setProperty("ALADIN_TTB_KEY", response.getResponseText().trim());
   ui.alert("알라딘 TTBKey를 Script Properties에 저장했습니다.");
+}
+
+function setSpreadsheetId() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt("구글시트 ID 입력", "신청을 받을 구글시트 주소의 /d/와 /edit 사이에 있는 ID를 입력하세요.", ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+  const id = response.getResponseText().trim();
+  if (!id || id.indexOf("/") !== -1 || id.indexOf("macros") !== -1) {
+    ui.alert("구글시트 ID만 입력해주세요. Apps Script 라이브러리 주소나 웹 앱 주소가 아닙니다.");
+    return;
+  }
+  PropertiesService.getScriptProperties().setProperty("SPREADSHEET_ID", id);
+  ui.alert("SPREADSHEET_ID를 Script Properties에 저장했습니다.");
 }
 
 function loginUser_(payload) {
@@ -364,4 +378,12 @@ function maskName_(name) {
 
 function json_(payload) {
   return ContentService.createTextOutput(JSON.stringify(payload)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function friendlyError_(error) {
+  const message = error && error.message ? error.message : String(error || "");
+  if (message.indexOf("Illegal spreadsheet id or key") !== -1) {
+    return "구글시트 ID가 올바르지 않습니다. Apps Script 프로젝트 설정의 SPREADSHEET_ID에는 구글시트 주소의 /d/와 /edit 사이에 있는 값만 입력해주세요.";
+  }
+  return message;
 }

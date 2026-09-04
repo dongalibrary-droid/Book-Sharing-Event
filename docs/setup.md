@@ -16,13 +16,17 @@
 3. Script Properties에 아래 값을 저장합니다.
    - `ALADIN_TTB_KEY`: 보유 중인 알라딘 Open API TTBKey
    - `SPREADSHEET_ID`: 신청을 받을 구글시트 주소의 `/d/`와 `/edit` 사이에 있는 긴 ID입니다. 같은 시트에 바인딩된 Apps Script라면 생략 가능하지만, 배포 오류를 줄이려면 등록하는 것을 권장합니다.
+     - 예: `https://docs.google.com/spreadsheets/d/구글시트ID/edit#gid=0` 주소에서 `구글시트ID` 부분만 입력합니다.
+     - `https://script.google.com/macros/library/d/...` 주소의 ID는 Apps Script 라이브러리 ID라서 `SPREADSHEET_ID`로 쓰면 안 됩니다.
+     - `1AbCdEfGhijk12345XYZ` 같은 예시 값이 남아 있으면 반드시 실제 구글시트 ID로 바꿉니다.
 4. Apps Script 편집기 상단 함수 선택 목록에서 `setupCareerBookGiveawaySheets`를 선택하고 `실행`을 눌러 권한을 승인합니다.
    - 첫 실행 때 권한 승인 창이 나오면 Google 계정을 선택합니다.
    - "이 앱은 Google에서 확인하지 않았습니다" 화면이 나오면 `고급 > 프로젝트로 이동 > 허용` 순서로 승인합니다.
    - 실행 후 구글시트에 `도서목록`, `신청현황`, `이용자`, `설정` 시트가 있는지 확인합니다.
-5. `배포 > 새 배포 > 웹 앱`을 선택합니다.
-6. 실행 권한은 본인, 접근 권한은 행사 운영 방식에 맞게 설정합니다.
-7. 배포 후 웹 앱 URL을 복사합니다.
+5. 필요하면 함수 선택 목록에서 `setSpreadsheetId`, `setAladinTtbKey`를 각각 실행해 값을 대화상자에 입력할 수 있습니다.
+6. `배포 > 새 배포 > 웹 앱`을 선택합니다.
+7. 실행 권한은 본인, 접근 권한은 행사 운영 방식에 맞게 설정합니다.
+8. 배포 후 웹 앱 URL을 복사합니다.
 
 ## 3. 웹사이트와 연결
 
