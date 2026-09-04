@@ -17,7 +17,8 @@ body { margin: 0; color: var(--ink); font-family: "Noto Sans KR", Arial, sans-se
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 a { color: inherit; text-decoration: none; }
-.settings-pending [data-setting] { visibility: hidden; }
+[data-setting].is-typing::after { content: "|"; display: inline-block; margin-left: 2px; color: var(--accent); animation: caretBlink .9s steps(1) infinite; }
+@keyframes caretBlink { 50% { opacity: 0; } }
 .site-header { position: sticky; top: 0; z-index: 20; background: rgba(255,255,255,.96); border-bottom: 1px solid var(--line); backdrop-filter: blur(12px); }
 .top-strip { display: flex; justify-content: center; gap: 28px; padding: 8px 20px; color: #fff; background: linear-gradient(90deg, var(--blue-dark), var(--blue), var(--green)); font-size: 13px; font-weight: 800; }
 .brand-row { max-width: 1280px; margin: 0 auto; padding: 11px 24px 9px; display: flex; align-items: center; justify-content: space-between; gap: 28px; }

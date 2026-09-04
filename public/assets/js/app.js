@@ -1,16 +1,17 @@
 (function () {
   const config = window.CAREER_BOOKS_CONFIG || {};
+  const SETTINGS_TYPE_DELAY_MS = 5000;
+  const settingsStartedAt = Date.now();
   const siteDefaults = {
-    SITE_TITLE: "동아대학교 도서관 도서 나눔",
+    SITE_TITLE: "도서 나눔 플랫폼",
     SITE_EYEBROW: "Library Book Sharing",
-    SITE_DESCRIPTION: "학번, 성명, 휴대폰번호로 로그인하면 도서 신청과 진행상황 확인을 한 곳에서 관리할 수 있습니다.",
+    SITE_DESCRIPTION: "로그인 후 도서 신청과 진행상황 확인을 한 곳에서 관리할 수 있습니다.",
     FOOTER_TITLE: "동좌문도",
     FOOTER_HEADING: "동아대학교 도서관",
     FOOTER_QUOTE: "“스승과 제자가 한자리에 앉아서 정도(正道)가 무엇인지 묻고 답한다.”",
     FOOTER_DESCRIPTION: "동아대학교 도서관도 함께 길을 물으며 설립자의 교육철학 이념을 따릅니다.",
   };
   const pageName = document.body.dataset.page || "catalog";
-  const cachedSiteSettings = loadJson("careerBookSiteSettings", null);
   const state = {
     books: [],
     filtered: [],
@@ -23,7 +24,7 @@
     activeBook: null,
     myRequests: [],
     selectedRequestIds: new Set(),
-    siteSettings: { ...siteDefaults, ...(cachedSiteSettings || {}) },
+    siteSettings: { ...siteDefaults },
     coverCache: loadJson("careerBookCoverCache", {}),
     cart: loadJson("careerBookCart", []),
     user: loadJson("careerBookUser", null),
@@ -41,7 +42,6 @@
     renderAuth();
     bindCommon();
     applySiteSettings();
-    if (cachedSiteSettings) releaseSettingText();
     loadSiteSettings();
 
     if (pageName === "login") {
@@ -253,28 +253,28 @@
   }
 
   async function loadSiteSettings() {
-    if (!config.appsScriptUrl) {
-      releaseSettingText();
-      return;
-    }
+    if (!config.appsScriptUrl) return;
     try {
       const payload = await getFromSheet({ action: "settings" });
       if (!payload.ok || !payload.settings) return;
-      state.siteSettings = { ...state.siteSettings, ...payload.settings };
-      saveJson("careerBookSiteSettings", state.siteSettings);
-      applySiteSettings();
+      const settings = { ...state.siteSettings, ...payload.settings };
+      const delay = Math.max(0, SETTINGS_TYPE_DELAY_MS - (Date.now() - settingsStartedAt));
+      window.setTimeout(() => {
+        state.siteSettings = settings;
+        applySiteSettings({ typing: true });
+      }, delay);
     } catch (error) {
       // Settings are optional; the static defaults keep the site usable.
-    } finally {
-      releaseSettingText();
     }
   }
 
-  function applySiteSettings() {
+  function applySiteSettings(options = {}) {
     const settings = state.siteSettings;
     document.querySelectorAll("[data-setting]").forEach((element) => {
       const value = settings[element.dataset.setting];
-      if (value) element.textContent = value;
+      if (!value || element.textContent === value) return;
+      if (options.typing) typeSettingText(element, value);
+      else element.textContent = value;
     });
     const siteTitle = settings.SITE_TITLE || siteDefaults.SITE_TITLE;
     if (pageName === "login") document.title = `로그인 | ${siteTitle}`;
@@ -284,8 +284,23 @@
     if (pageName === "detail" && !state.activeBook) document.title = `도서 상세 | ${siteTitle}`;
   }
 
-  function releaseSettingText() {
-    document.body.classList.remove("settings-pending");
+  function typeSettingText(element, value) {
+    const text = String(value || "");
+    const previousTimer = Number(element.dataset.typingTimer || 0);
+    if (previousTimer) window.clearInterval(previousTimer);
+    element.textContent = "";
+    element.classList.add("is-typing");
+    let index = 0;
+    const timer = window.setInterval(() => {
+      index += 1;
+      element.textContent = text.slice(0, index);
+      if (index >= text.length) {
+        window.clearInterval(timer);
+        element.classList.remove("is-typing");
+        delete element.dataset.typingTimer;
+      }
+    }, Math.max(24, Math.min(52, Math.floor(900 / Math.max(text.length, 1)))));
+    element.dataset.typingTimer = String(timer);
   }
 
   function bindLogin() {
