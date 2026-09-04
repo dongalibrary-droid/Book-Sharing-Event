@@ -245,14 +245,18 @@ body.logged-in .floating-cart { display: inline-flex; align-items: center; justi
   .login-card { width: min(100%, 520px); justify-self: end; }
 }
 @media (max-width: 640px) {
+  html, body { overflow-x: hidden; }
   .top-strip { justify-content: space-between; gap: 12px; font-size: 12px; }
   .brand-row { padding: 12px 16px; }
   .anniversary-logo { width: 86px; }
   .library-logo { width: min(240px, 62vw); max-height: 42px; }
-  .nav { padding: 0 12px; }
-  .nav > a, .nav > button { min-height: 42px; gap: 5px; padding: 0 8px; font-size: 13px; }
+  .nav { flex-wrap: wrap; justify-content: flex-start; gap: 0; overflow: visible; padding: 0; }
+  .nav > a, .nav > button { flex: 1 1 auto; min-height: 42px; justify-content: center; gap: 5px; padding: 0 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
   .nav > button span { min-width: 20px; height: 20px; font-size: 11px; }
-  .auth-area { position: static; margin-left: 0; flex: 0 0 auto; min-width: auto; padding-left: 8px; }
+  .auth-area { position: static; flex: 0 0 100%; width: 100%; min-width: 0; height: auto; min-height: 42px; justify-content: flex-end; gap: 8px; padding: 6px 16px; border-top: 0; border-left: 0; border-bottom: 1px solid var(--line); background: #fff; }
+  .auth-area .login-link { min-height: 34px; padding: 0 10px; }
+  .user-chip { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .logout-button { flex: 0 0 auto; }
   .category-list { grid-template-columns: repeat(2, minmax(0,1fr)); }
   .category-button { min-height: 38px; padding: 0 8px; font-size: 13px; }
   .category-button span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -263,8 +267,11 @@ body.logged-in .floating-cart { display: inline-flex; align-items: center; justi
   .hero { padding: 24px 18px; background: linear-gradient(120deg, rgba(7,58,114,.96), rgba(21,89,168,.86)), url("../images/80logo.webp") center bottom / 120% auto no-repeat; }
   .hero h1 { font-size: 34px; }
   .hero p:last-child { font-size: 16px; }
-  .toolbar { grid-template-columns: 1fr 44px 44px; }
+  .toolbar { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; padding: 14px; }
+  .search-box { grid-column: 1 / -1; width: 100%; padding: 0 14px; }
+  .search-box input { font-size: 16px; }
   .toolbar select { grid-column: 1 / -1; }
+  .icon-button { width: 100%; }
   .result-head, .actions, .detail-actions { align-items: stretch; flex-direction: column; }
   .bulk-actions { align-items: stretch; flex-direction: column; }
   .bulk-actions button { width: 100%; margin-left: 0; }
@@ -272,10 +279,12 @@ body.logged-in .floating-cart { display: inline-flex; align-items: center; justi
   .request-card.has-select { grid-template-columns: 28px minmax(0,1fr); align-items: start; }
   .request-card.has-select .request-cancel { grid-column: 1 / -1; }
   .book-card, .grid-view, .grid-view .book-card { grid-template-columns: 1fr; }
+  .book-actions { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+  .book-actions button, .book-actions .detail-link { width: 100%; min-width: 0; padding: 0 8px; white-space: nowrap; font-size: 14px; }
   .book-title { font-size: 20px; }
   .detail h2 { font-size: 24px; }
   .form-grid { grid-template-columns: 1fr; }
-  .floating-cart { right: 16px; bottom: 16px; width: 54px; height: 54px; }
+  .floating-cart { right: 16px; bottom: calc(18px + env(safe-area-inset-bottom)); width: 54px; height: 54px; }
   .footer-links { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); padding: 0 18px; }
   .footer-links a { min-height: 42px; padding: 0 10px; border-right: 0; border-bottom: 1px solid rgba(255,255,255,.1); font-size: 12px; }
   .footer-links a:first-child { padding-left: 10px; }
@@ -283,4 +292,18 @@ body.logged-in .floating-cart { display: inline-flex; align-items: center; justi
   .footer-brand img { width: 250px; }
   .footer-bottom { padding: 20px 18px; }
   .footer-bottom p { font-size: 12px; overflow-wrap: anywhere; }
+}
+@media (max-width: 380px) {
+  .top-strip { padding: 8px 12px; font-size: 11px; }
+  .brand-row { padding-inline: 12px; }
+  .library-logo { width: min(218px, 60vw); }
+  .anniversary-logo { width: 76px; }
+  .nav > a, .nav > button { padding: 0 6px; font-size: 12px; }
+  main { padding: 14px 12px; }
+  .page-title h1 { font-size: 32px; }
+  .summary.compact div { min-height: 70px; padding: 10px 6px; }
+  .summary.compact strong { font-size: 23px; }
+  .summary.compact span { font-size: 13px; }
+  .toolbar { padding: 12px; }
+  .search-box { min-height: 52px; gap: 10px; }
 }
