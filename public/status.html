@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="취업지원실 도서 나눔 행사 신청 진행상황" />
+  <title>신청 진행상황 | 취업지원실 도서 나눔 행사</title>
+  <link rel="icon" href="assets/images/search-icon-05.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body data-page="status">
+  <script>
+    window.CAREER_BOOKS_CONFIG = {
+      appsScriptUrl: "https://script.google.com/macros/s/AKfycbxQrpdAeaKGvu-27715evDBXFt12FP6ooytHYzLt1wN_pWMdPyy47GGPgZQwESDbD7X/exec",
+      dataUrl: "assets/data/career-books.json"
+    };
+  </script>
+  <header class="site-header">
+    <div class="top-strip"><span>Dong-A University Library</span><span>80th Anniversary</span></div>
+    <div class="brand-row">
+      <a href="index.html"><img class="library-logo" src="assets/images/black-logo.png" alt="동아대학교 도서관" /></a>
+      <img class="anniversary-logo" src="assets/images/80logo.webp" alt="동아대학교 80주년" />
+    </div>
+    <nav class="nav">
+      <a href="catalog.html">도서목록</a>
+      <a class="active" href="status.html">신청 진행상황</a>
+      <a href="guide.html">이용안내</a>
+      <button type="button" data-cart-open><i class="fa-solid fa-cart-shopping"></i> 장바구니 <span id="navCartCount">0</span></button>
+      <div class="auth-area" id="authArea"></div>
+    </nav>
+  </header>
+  <main>
+    <section class="page-title">
+      <div>
+        <p class="eyebrow">My Requests</p>
+        <h1>신청 진행상황</h1>
+        <p>로그인한 정보로 접수된 신청 도서를 확인하고, 접수 상태의 신청은 취소할 수 있습니다.</p>
+      </div>
+      <a class="primary page-cta" href="catalog.html">도서목록 보기</a>
+    </section>
+    <section class="my-status-panel">
+      <div class="result-head"><div><strong id="myRequestCount">0</strong>건의 신청내역</div><button type="button" class="outline" id="refreshMine"><i class="fa-solid fa-rotate"></i> 새로고침</button></div>
+      <div id="myRequests" class="request-list"></div>
+    </section>
+  </main>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>

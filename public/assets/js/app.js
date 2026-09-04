@@ -1,0 +1,692 @@
+(function () {
+  const config = window.CAREER_BOOKS_CONFIG || {};
+  const pageName = document.body.dataset.page || "catalog";
+  const state = {
+    books: [],
+    filtered: [],
+    pendingIds: new Set(),
+    category: "전체",
+    view: "list",
+    page: 1,
+    perPage: 25,
+    selectedBooks: [],
+    activeBook: null,
+    cart: loadJson("careerBookCart", []),
+    user: loadJson("careerBookUser", null),
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const els = {};
+
+  document.addEventListener("DOMContentLoaded", init);
+
+  async function init() {
+    ensureSharedUi();
+    collectElements();
+    renderAuth();
+    bindCommon();
+
+    if (pageName === "login") {
+      if (state.user) {
+        location.replace("catalog.html");
+        return;
+      }
+      bindLogin();
+      return;
+    }
+
+    if (hasCart()) {
+      await loadBooks();
+      updateCart();
+    }
+
+    if (pageName === "catalog") {
+      bindCatalog();
+      renderCategories();
+      await refreshPending(false);
+      filterBooks();
+    }
+
+    if (pageName === "detail") {
+      bindDetailPage();
+      await refreshPending(false);
+      renderDetailPage();
+    }
+
+    if (pageName === "status") {
+      bindStatus();
+      await loadMyRequests();
+    }
+  }
+
+  function ensureSharedUi() {
+    if (hasCart() && !$("cartDrawer")) {
+      document.body.insertAdjacentHTML("beforeend", `
+        <aside class="drawer" id="cartDrawer" aria-hidden="true">
+          <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="cartTitle">
+            <div class="drawer-head">
+              <h2 id="cartTitle">장바구니</h2>
+              <button type="button" data-cart-close aria-label="닫기"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="cartItems" class="cart-items"></div>
+            <div class="actions">
+              <button type="button" class="ghost" id="clearCart">비우기</button>
+              <button type="button" class="primary" id="applyCart">신청하기</button>
+            </div>
+          </div>
+        </aside>
+      `);
+    }
+    if (hasCart() && !$("applyModal")) {
+      document.body.insertAdjacentHTML("beforeend", `
+        <div class="modal" id="applyModal" aria-hidden="true">
+          <form class="modal-panel apply-form" id="applyForm" role="dialog" aria-modal="true" aria-labelledby="applyTitle">
+            <button class="close" type="button" data-apply-close aria-label="닫기"><i class="fa-solid fa-xmark"></i></button>
+            <h2 id="applyTitle">도서 신청</h2>
+            <p id="applySummary" class="muted"></p>
+            <label class="memo-only">메모<textarea name="memo" rows="3" placeholder="담당자에게 남길 말이 있으면 입력하세요."></textarea></label>
+            <div class="actions">
+              <button type="button" class="ghost" data-apply-close>취소</button>
+              <button type="submit" class="primary">신청 제출</button>
+            </div>
+          </form>
+        </div>
+      `);
+    }
+  }
+
+  function collectElements() {
+    [
+      "authArea", "toast", "loginForm", "totalBooks", "availableBooks", "cartBooks",
+      "navCartCount", "floatCartCount", "searchInput", "sortSelect", "categoryList",
+      "resetFilters", "availableOnly", "hidePending", "resultCount", "refreshLive",
+      "bookResults", "pager", "cartDrawer", "cartItems", "clearCart", "applyCart",
+      "bookModal", "detailCover", "detailCategory", "detailTitle", "detailAuthor",
+      "detailMeta", "detailDescription", "detailApply", "detailCart", "detailPage",
+      "detailCatalog", "applyModal", "applyForm", "applySummary", "myRequestCount",
+      "myRequests", "refreshMine", "pageDetailCover", "pageDetailCategory",
+      "pageDetailTitle", "pageDetailAuthor", "pageDetailMeta", "pageDetailDescription",
+      "pageDetailApply", "pageDetailCart", "pageRegistrationNo", "pageCallNo",
+      "pageLocation", "pageCatalogLink"
+    ].forEach((id) => {
+      els[id] = $(id);
+    });
+  }
+
+  function bindCommon() {
+    document.querySelectorAll(".brand-row a").forEach((link) => {
+      link.addEventListener("click", (event) => {
+        if (state.user) {
+          event.preventDefault();
+          location.href = "catalog.html";
+        }
+      });
+    });
+    document.querySelectorAll("[data-cart-open]").forEach((button) => button.addEventListener("click", openCart));
+    document.querySelectorAll("[data-cart-close]").forEach((button) => button.addEventListener("click", closeCart));
+    document.querySelectorAll("[data-apply-close]").forEach((button) => button.addEventListener("click", closeApply));
+    document.querySelectorAll("[data-modal-close]").forEach((button) => button.addEventListener("click", closePreview));
+    if (els.clearCart) {
+      els.clearCart.addEventListener("click", () => {
+        state.cart = [];
+        saveJson("careerBookCart", state.cart);
+        updateCart();
+      });
+    }
+    if (els.applyCart) {
+      els.applyCart.addEventListener("click", () => openApply(state.cart.map(findBook).filter(Boolean), "cart"));
+    }
+    if (els.applyForm) els.applyForm.addEventListener("submit", submitApplication);
+    [els.cartDrawer, els.bookModal, els.applyModal].filter(Boolean).forEach((layer) => {
+      layer.addEventListener("click", (event) => {
+        if (event.target === layer) closeLayer(layer);
+      });
+    });
+    document.addEventListener("click", (event) => {
+      if (event.target.closest("[data-logout]")) {
+        localStorage.removeItem("careerBookUser");
+        state.user = null;
+        renderAuth();
+        toast("로그아웃되었습니다.");
+        if (pageName !== "login") location.href = "index.html";
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeAll();
+    });
+  }
+
+  function bindLogin() {
+    if (!els.loginForm) return;
+    els.loginForm.addEventListener("submit", login);
+  }
+
+  function bindCatalog() {
+    els.searchInput.addEventListener("input", debounce(() => {
+      state.page = 1;
+      filterBooks();
+    }, 120));
+    els.sortSelect.addEventListener("change", () => {
+      state.page = 1;
+      filterBooks();
+    });
+    els.resetFilters.addEventListener("click", () => {
+      state.category = "전체";
+      els.availableOnly.checked = false;
+      els.hidePending.checked = false;
+      state.page = 1;
+      renderCategories();
+      filterBooks();
+    });
+    els.availableOnly.addEventListener("change", () => {
+      state.page = 1;
+      filterBooks();
+    });
+    els.hidePending.addEventListener("change", () => {
+      state.page = 1;
+      filterBooks();
+    });
+    els.refreshLive.addEventListener("click", () => refreshPending(true));
+    document.querySelectorAll("[data-view]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.view = button.dataset.view;
+        document.querySelectorAll("[data-view]").forEach((item) => item.classList.toggle("active", item === button));
+        renderBooks();
+      });
+    });
+    if (els.detailApply) els.detailApply.addEventListener("click", () => state.activeBook && openApply([state.activeBook], "preview"));
+    if (els.detailCart) els.detailCart.addEventListener("click", () => state.activeBook && addCart(state.activeBook.bookId));
+  }
+
+  function bindDetailPage() {
+    if (els.pageDetailApply) els.pageDetailApply.addEventListener("click", () => state.activeBook && openApply([state.activeBook], "detail"));
+    if (els.pageDetailCart) els.pageDetailCart.addEventListener("click", () => state.activeBook && addCart(state.activeBook.bookId));
+  }
+
+  function bindStatus() {
+    if (els.refreshMine) els.refreshMine.addEventListener("click", () => loadMyRequests(true));
+  }
+
+  async function login(event) {
+    event.preventDefault();
+    const form = new FormData(els.loginForm);
+    const user = {
+      studentId: onlyText(form.get("studentId")),
+      studentName: onlyText(form.get("studentName")),
+      phone: onlyText(form.get("phone")),
+    };
+    if (!user.studentId || !user.studentName || !user.phone) {
+      toast("학번, 성명, 휴대폰번호를 모두 입력해주세요.");
+      return;
+    }
+    const button = els.loginForm.querySelector("button[type='submit']");
+    button.disabled = true;
+    try {
+      if (config.appsScriptUrl) {
+        const result = await postToSheet({ action: "login", ...user, privacyConsent: true });
+        if (!result.ok) throw new Error(result.message || "로그인하지 못했습니다.");
+      }
+      state.user = user;
+      saveJson("careerBookUser", user);
+      location.href = "catalog.html";
+    } catch (error) {
+      toast(error.message || "로그인 중 오류가 발생했습니다.");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function loadBooks() {
+    if (state.books.length) return;
+    const response = await fetch(config.dataUrl || "assets/data/career-books.json", { cache: "no-store" });
+    if (!response.ok) throw new Error("도서 목록을 불러오지 못했습니다.");
+    const payload = await response.json();
+    state.books = (payload.books || []).map((book) => ({
+      ...book,
+      searchText: normalize(`${book.title} ${book.author} ${book.registrationNo} ${book.callNo} ${book.category}`),
+    }));
+    if (els.totalBooks) els.totalBooks.textContent = fmt(state.books.length);
+    if (els.availableBooks) els.availableBooks.textContent = fmt(state.books.filter(available).length);
+  }
+
+  async function refreshPending(manual) {
+    if (!config.appsScriptUrl) {
+      if (manual) toast("신청 상태를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.");
+      return;
+    }
+    try {
+      const payload = await getFromSheet({ action: "pending" });
+      const entries = payload.entries || [];
+      state.pendingIds = new Set(entries.map((entry) => entry.bookId).filter(Boolean));
+      if (pageName === "catalog") filterBooks();
+      if (manual) toast("신청 상태를 새로 확인했습니다.");
+    } catch (error) {
+      if (manual) toast("신청 상태를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.");
+    }
+  }
+
+  function renderCategories() {
+    const counts = new Map();
+    state.books.forEach((book) => counts.set(book.category, (counts.get(book.category) || 0) + 1));
+    const rows = [["전체", state.books.length], ...Array.from(counts.entries()).sort((a, b) => b[1] - a[1])];
+    els.categoryList.innerHTML = rows.map(([label, count]) => (
+      `<button type="button" class="category-button${state.category === label ? " active" : ""}" data-category="${attr(label)}">
+        <span>${html(label)}</span><span>${fmt(count)}</span>
+      </button>`
+    )).join("");
+    els.categoryList.querySelectorAll("button").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.category = button.dataset.category;
+        state.page = 1;
+        renderCategories();
+        filterBooks();
+      });
+    });
+  }
+
+  function filterBooks() {
+    const query = normalize(els.searchInput.value);
+    const sort = els.sortSelect.value;
+    state.filtered = state.books.filter((book) => {
+      if (state.category !== "전체" && book.category !== state.category) return false;
+      if (query && !book.searchText.includes(query)) return false;
+      if (els.availableOnly.checked && !available(book)) return false;
+      if (els.hidePending.checked && state.pendingIds.has(book.bookId)) return false;
+      return true;
+    });
+    state.filtered.sort((a, b) => {
+      if (sort === "title") return a.title.localeCompare(b.title, "ko");
+      if (sort === "year") return Number(b.publicationYear || 0) - Number(a.publicationYear || 0);
+      if (sort === "price") return Number(b.price || 0) - Number(a.price || 0);
+      return Number(a.sourceNo || 0) - Number(b.sourceNo || 0);
+    });
+    els.resultCount.textContent = fmt(state.filtered.length);
+    renderBooks();
+  }
+
+  function renderBooks() {
+    const pages = Math.max(1, Math.ceil(state.filtered.length / state.perPage));
+    state.page = Math.min(state.page, pages);
+    const pageItems = state.filtered.slice((state.page - 1) * state.perPage, state.page * state.perPage);
+    els.bookResults.className = `book-results ${state.view}-view`;
+    els.bookResults.innerHTML = pageItems.map(renderBookCard).join("") || `<p class="empty">조건에 맞는 도서가 없습니다.</p>`;
+    els.bookResults.querySelectorAll("[data-preview]").forEach((button) => button.addEventListener("click", () => openPreview(findBook(button.dataset.preview))));
+    els.bookResults.querySelectorAll("[data-cart-book]").forEach((button) => button.addEventListener("click", () => addCart(button.dataset.cartBook)));
+    els.bookResults.querySelectorAll("[data-apply-book]").forEach((button) => button.addEventListener("click", () => openApply([findBook(button.dataset.applyBook)], "single")));
+    renderPager(pages);
+  }
+
+  function renderBookCard(book) {
+    const pending = state.pendingIds.has(book.bookId);
+    const canApply = available(book) && !pending;
+    const status = pending ? "신청 진행중" : book.status || "신청가능";
+    return `<article class="book-card">
+      ${cover(book)}
+      <div>
+        <span class="status${canApply ? "" : " closed"}">${html(status)}</span>
+        <h3 class="book-title">${html(book.title)}</h3>
+        <p class="book-sub">${html(book.author || "저자 정보 없음")} · ${html(book.publicationYear || "연도 미상")}</p>
+        <div class="book-meta">
+          <span>${html(book.category)}</span>
+          <span>${html(book.registrationNo)}</span>
+          <span>${html(book.callNo || "청구기호 없음")}</span>
+          ${book.price ? `<span class="price">${fmt(book.price)}원</span>` : ""}
+        </div>
+      </div>
+      <div class="book-actions">
+        <button class="apply" type="button" data-apply-book="${attr(book.bookId)}" ${canApply ? "" : "disabled"}>바로 신청</button>
+        <button class="cart" type="button" data-cart-book="${attr(book.bookId)}" ${canApply ? "" : "disabled"}>장바구니</button>
+        <button class="preview" type="button" data-preview="${attr(book.bookId)}">미리보기</button>
+        <a class="detail-link" href="detail.html?id=${encodeURIComponent(book.bookId)}">상세보기</a>
+      </div>
+    </article>`;
+  }
+
+  function renderPager(pageCount) {
+    if (pageCount <= 1) {
+      els.pager.innerHTML = "";
+      return;
+    }
+    const pages = new Set([1, pageCount, state.page - 1, state.page, state.page + 1]);
+    for (let i = 1; i <= Math.min(5, pageCount); i += 1) pages.add(i);
+    const ordered = Array.from(pages).filter((value) => value >= 1 && value <= pageCount).sort((a, b) => a - b);
+    els.pager.innerHTML = ordered.map((value, index) => `${index > 0 && value - ordered[index - 1] > 1 ? `<span class="empty">...</span>` : ""}<button type="button" class="${value === state.page ? "active" : ""}" data-page="${value}">${value}</button>`).join("");
+    els.pager.querySelectorAll("button").forEach((button) => button.addEventListener("click", () => {
+      state.page = Number(button.dataset.page);
+      renderBooks();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }));
+  }
+
+  async function openPreview(book) {
+    if (!book) return;
+    state.activeBook = book;
+    els.detailCategory.textContent = book.category;
+    els.detailTitle.textContent = book.title;
+    els.detailAuthor.textContent = book.author || "저자 정보 없음";
+    els.detailMeta.textContent = `${book.registrationNo} · ${book.callNo || "청구기호 없음"} · ${book.publicationYear || "연도 미상"}`;
+    els.detailCatalog.href = book.detailUrl || "#";
+    if (els.detailPage) els.detailPage.href = `detail.html?id=${encodeURIComponent(book.bookId)}`;
+    els.detailCover.innerHTML = cover(book);
+    els.detailDescription.textContent = "도서 소개를 불러오는 중입니다.";
+    openLayer(els.bookModal);
+    const meta = await metaFromAladin(book);
+    if (state.activeBook !== book) return;
+    if (meta && meta.cover) els.detailCover.innerHTML = `<img src="${attr(meta.cover)}" alt="${attr(book.title)} 표지" />`;
+    els.detailDescription.textContent = meta && meta.description ? meta.description : "도서 소개 정보가 준비되지 않았습니다.";
+  }
+
+  async function renderDetailPage() {
+    const id = new URLSearchParams(location.search).get("id");
+    const book = findBook(id);
+    if (!book) {
+      els.pageDetailTitle.textContent = "도서를 찾을 수 없습니다.";
+      els.pageDetailDescription.textContent = "도서목록으로 돌아가 다시 선택해주세요.";
+      return;
+    }
+    state.activeBook = book;
+    document.title = `${book.title} | 취업지원실 도서 나눔 행사`;
+    els.pageDetailCategory.textContent = book.category;
+    els.pageDetailTitle.textContent = book.title;
+    els.pageDetailAuthor.textContent = book.author || "저자 정보 없음";
+    els.pageDetailMeta.textContent = `${book.publicationYear || "연도 미상"} · ${book.price ? `${fmt(book.price)}원` : "가격 정보 없음"}`;
+    els.pageRegistrationNo.textContent = book.registrationNo;
+    els.pageCallNo.textContent = book.callNo || "청구기호 없음";
+    els.pageLocation.textContent = book.location || "취업지원실";
+    els.pageCatalogLink.href = book.detailUrl || "#";
+    els.pageDetailCover.innerHTML = cover(book);
+    els.pageDetailDescription.textContent = "책 소개를 불러오는 중입니다.";
+    const meta = await metaFromAladin(book);
+    if (meta && meta.cover) els.pageDetailCover.innerHTML = `<img src="${attr(meta.cover)}" alt="${attr(book.title)} 표지" />`;
+    els.pageDetailDescription.textContent = meta && meta.description ? meta.description : "책 소개 정보가 준비되지 않았습니다.";
+  }
+
+  async function metaFromAladin(book) {
+    if (!config.appsScriptUrl) return null;
+    try {
+      const payload = await getFromSheet({
+        action: "bookMeta",
+        bookId: book.bookId,
+        title: book.title,
+        author: book.author || "",
+        isbn13: book.isbn13 || "",
+      });
+      return payload.ok ? payload.item : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function addCart(bookId) {
+    const book = findBook(bookId);
+    if (!book || state.pendingIds.has(bookId) || !available(book)) return toast("이미 신청 진행중이거나 마감된 도서입니다.");
+    if (!state.cart.includes(bookId)) {
+      state.cart.push(bookId);
+      saveJson("careerBookCart", state.cart);
+      updateCart();
+      toast("장바구니에 담았습니다.");
+    } else {
+      toast("이미 장바구니에 있는 도서입니다.");
+    }
+  }
+
+  function updateCart() {
+    const books = state.cart.map(findBook).filter(Boolean);
+    if (els.cartBooks) els.cartBooks.textContent = fmt(books.length);
+    document.querySelectorAll("#navCartCount").forEach((item) => { item.textContent = fmt(books.length); });
+    if (els.floatCartCount) els.floatCartCount.textContent = fmt(books.length);
+    if (!els.cartItems) return;
+    els.cartItems.innerHTML = books.length ? books.map((book) => (
+      `<div class="cart-item">
+        <div><strong>${html(book.title)}</strong><span>${html(book.registrationNo)} · ${html(book.author || "")}</span></div>
+        <button type="button" data-remove="${attr(book.bookId)}" aria-label="삭제"><i class="fa-solid fa-trash"></i></button>
+      </div>`
+    )).join("") : `<p class="empty">장바구니가 비어 있습니다.</p>`;
+    els.cartItems.querySelectorAll("[data-remove]").forEach((button) => button.addEventListener("click", () => {
+      state.cart = state.cart.filter((cartId) => cartId !== button.dataset.remove);
+      saveJson("careerBookCart", state.cart);
+      updateCart();
+    }));
+    els.applyCart.disabled = books.length === 0;
+  }
+
+  function openApply(books, source) {
+    if (!state.user) {
+      toast("로그인 후 신청할 수 있습니다.");
+      setTimeout(() => location.href = "index.html", 700);
+      return;
+    }
+    const selected = (books || []).filter(Boolean).filter((book) => available(book) && !state.pendingIds.has(book.bookId));
+    if (!selected.length) return toast("신청 가능한 도서를 먼저 선택해주세요.");
+    state.selectedBooks = selected;
+    els.applyForm.dataset.source = source;
+    els.applySummary.textContent = selected.length === 1 ? `"${selected[0].title}" 1권을 신청합니다.` : `${selected.length}권을 한 번에 신청합니다.`;
+    openLayer(els.applyModal);
+  }
+
+  async function submitApplication(event) {
+    event.preventDefault();
+    if (!state.user) return toast("로그인 후 신청할 수 있습니다.");
+    if (!config.appsScriptUrl) return toast("신청을 접수하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    const form = new FormData(els.applyForm);
+    const payload = {
+      action: "submitApplication",
+      source: els.applyForm.dataset.source || "site",
+      studentName: state.user.studentName,
+      studentId: state.user.studentId,
+      phone: state.user.phone,
+      memo: form.get("memo"),
+      books: state.selectedBooks.map((book) => ({
+        bookId: book.bookId,
+        registrationNo: book.registrationNo,
+        title: book.title,
+        author: book.author,
+        isbn13: book.isbn13 || "",
+      })),
+    };
+    const button = els.applyForm.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const result = await postToSheet(payload);
+      if (!result.ok) throw new Error(result.message || "신청 접수 실패");
+      state.cart = state.cart.filter((id) => !state.selectedBooks.some((book) => book.bookId === id));
+      saveJson("careerBookCart", state.cart);
+      updateCart();
+      closeAll();
+      els.applyForm.reset();
+      toast("신청이 접수되었습니다.");
+      await refreshPending(false);
+    } catch (error) {
+      toast(error.message || "신청 접수 중 오류가 발생했습니다.");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function loadMyRequests(manual) {
+    if (!els.myRequests) return;
+    if (!state.user) {
+      els.myRequestCount.textContent = "0";
+      els.myRequests.innerHTML = `<div class="empty-state"><strong>로그인이 필요합니다.</strong><p>학생 로그인 후 신청 진행상황을 확인할 수 있습니다.</p><a class="primary" href="index.html">로그인하기</a></div>`;
+      return;
+    }
+    if (!config.appsScriptUrl) {
+      els.myRequests.innerHTML = `<p class="empty">신청 내역을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</p>`;
+      return;
+    }
+    try {
+      const payload = await getFromSheet({ action: "myRequests", studentId: state.user.studentId, phone: state.user.phone });
+      const entries = payload.entries || [];
+      els.myRequestCount.textContent = fmt(entries.length);
+      renderMyRequests(entries);
+      if (manual) toast("신청내역을 새로 확인했습니다.");
+    } catch (error) {
+      els.myRequests.innerHTML = `<p class="empty">신청 내역을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</p>`;
+    }
+  }
+
+  function renderMyRequests(entries) {
+    els.myRequests.innerHTML = entries.length ? entries.map((entry) => {
+      const cancellable = entry.status === "신청접수" || entry.status === "처리중";
+      return `<article class="request-card">
+        <div>
+          <span class="status ${statusClass(entry.status)}">${html(entry.status)}</span>
+          <h3>${html(entry.title || entry.bookId)}</h3>
+          <p>${html(entry.registrationNo || "")} · ${html(entry.author || "저자 정보 없음")}</p>
+          <small>${html(entry.requestedAt || "")}</small>
+        </div>
+        <button type="button" class="ghost danger" data-cancel-request="${attr(entry.requestId)}" ${cancellable ? "" : "disabled"}>신청 취소</button>
+      </article>`;
+    }).join("") : `<div class="empty-state"><strong>아직 신청한 도서가 없습니다.</strong><p>도서목록에서 원하는 책을 신청해보세요.</p><a class="primary" href="catalog.html">도서목록 보기</a></div>`;
+    els.myRequests.querySelectorAll("[data-cancel-request]").forEach((button) => {
+      button.addEventListener("click", () => cancelRequest(button.dataset.cancelRequest));
+    });
+  }
+
+  async function cancelRequest(requestId) {
+    if (!requestId || !state.user) return;
+    if (!window.confirm("이 도서 신청을 취소할까요?")) return;
+    try {
+      const result = await postToSheet({
+        action: "cancelApplication",
+        requestId,
+        studentId: state.user.studentId,
+        phone: state.user.phone,
+      });
+      if (!result.ok) throw new Error(result.message || "신청을 취소하지 못했습니다.");
+      toast("신청이 취소되었습니다.");
+      await loadMyRequests(false);
+    } catch (error) {
+      toast(error.message || "신청을 취소하지 못했습니다.");
+    }
+  }
+
+  function renderAuth() {
+    if (!els.authArea) return;
+    if (!state.user) {
+      els.authArea.innerHTML = `<a class="login-link" href="index.html"><i class="fa-solid fa-right-to-bracket"></i> 로그인</a>`;
+      return;
+    }
+    els.authArea.innerHTML = `<span class="user-chip">(${html(state.user.studentId)}) ${html(state.user.studentName)} 님</span><button type="button" class="logout-button" data-logout>로그아웃</button>`;
+  }
+
+  async function getFromSheet(params) {
+    const url = new URL(config.appsScriptUrl);
+    Object.keys(params).forEach((key) => url.searchParams.set(key, params[key]));
+    const response = await fetch(url.toString(), { cache: "no-store" });
+    return response.json();
+  }
+
+  async function postToSheet(payload) {
+    const response = await fetch(config.appsScriptUrl, { method: "POST", body: JSON.stringify(payload) });
+    return response.json();
+  }
+
+  function cover(book) {
+    return `<div class="cover"><strong>${html(book.title)}</strong><span>${html(book.category)}</span></div>`;
+  }
+
+  function hasCart() {
+    return Boolean(document.querySelector("[data-cart-open]"));
+  }
+
+  function findBook(bookId) {
+    return state.books.find((book) => book.bookId === bookId);
+  }
+
+  function available(book) {
+    return (book.status || "신청가능") !== "마감" && Number(book.availableQuantity || 1) > 0;
+  }
+
+  function openCart() {
+    updateCart();
+    openLayer(els.cartDrawer);
+  }
+
+  function closeCart() {
+    closeLayer(els.cartDrawer);
+  }
+
+  function closePreview() {
+    closeLayer(els.bookModal);
+    if (pageName !== "detail") state.activeBook = null;
+  }
+
+  function closeApply() {
+    closeLayer(els.applyModal);
+  }
+
+  function closeAll() {
+    [els.cartDrawer, els.bookModal, els.applyModal].filter(Boolean).forEach(closeLayer);
+    if (pageName !== "detail") state.activeBook = null;
+  }
+
+  function openLayer(layer) {
+    if (!layer) return;
+    layer.classList.add("open");
+    layer.setAttribute("aria-hidden", "false");
+  }
+
+  function closeLayer(layer) {
+    if (!layer) return;
+    layer.classList.remove("open");
+    layer.setAttribute("aria-hidden", "true");
+  }
+
+  function statusClass(status) {
+    return status === "취소" ? "closed" : status === "확정" ? "confirmed" : "";
+  }
+
+  function loadJson(key, fallback) {
+    try {
+      return JSON.parse(localStorage.getItem(key) || "null") || fallback;
+    } catch (error) {
+      return fallback;
+    }
+  }
+
+  function saveJson(key, value) {
+    localStorage.setItem(key, JSON.stringify(value));
+  }
+
+  function toast(message) {
+    if (!els.toast) return;
+    els.toast.textContent = message;
+    els.toast.classList.add("show");
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => els.toast.classList.remove("show"), 2600);
+  }
+
+  function onlyText(value) {
+    return String(value || "").trim();
+  }
+
+  function normalize(value) {
+    return onlyText(value).toLowerCase().replace(/\s+/g, " ");
+  }
+
+  function fmt(value) {
+    return new Intl.NumberFormat("ko-KR").format(Number(value || 0));
+  }
+
+  function debounce(fn, wait) {
+    let timer;
+    return (...args) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), wait);
+    };
+  }
+
+  function html(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function attr(value) {
+    return html(value).replace(/`/g, "&#96;");
+  }
+})();

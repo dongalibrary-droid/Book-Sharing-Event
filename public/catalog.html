@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="동아대학교 도서관 취업지원실 도서 나눔 행사 도서목록" />
+  <title>도서목록 | 취업지원실 도서 나눔 행사</title>
+  <link rel="icon" href="assets/images/search-icon-05.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body data-page="catalog">
+  <script>
+    window.CAREER_BOOKS_CONFIG = {
+      appsScriptUrl: "https://script.google.com/macros/s/AKfycbxQrpdAeaKGvu-27715evDBXFt12FP6ooytHYzLt1wN_pWMdPyy47GGPgZQwESDbD7X/exec",
+      dataUrl: "assets/data/career-books.json"
+    };
+  </script>
+  <header class="site-header">
+    <div class="top-strip"><span>Dong-A University Library</span><span>80th Anniversary</span></div>
+    <div class="brand-row">
+      <a href="index.html"><img class="library-logo" src="assets/images/black-logo.png" alt="동아대학교 도서관" /></a>
+      <img class="anniversary-logo" src="assets/images/80logo.webp" alt="동아대학교 80주년" />
+    </div>
+    <nav class="nav">
+      <a class="active" href="catalog.html">도서목록</a>
+      <a href="status.html">신청 진행상황</a>
+      <a href="guide.html">이용안내</a>
+      <button type="button" data-cart-open><i class="fa-solid fa-cart-shopping"></i> 장바구니 <span id="navCartCount">0</span></button>
+      <div class="auth-area" id="authArea"></div>
+    </nav>
+  </header>
+  <main>
+    <section class="page-title">
+      <div>
+        <p class="eyebrow">Book Catalog</p>
+        <h1>도서목록</h1>
+        <p>분야별로 도서를 살펴보고, 원하는 책을 바로 신청하거나 장바구니에 담아 한 번에 신청하세요.</p>
+      </div>
+      <div class="summary compact">
+        <div><strong id="totalBooks">-</strong><span>전체</span></div>
+        <div><strong id="availableBooks">-</strong><span>신청 가능</span></div>
+        <div><strong id="cartBooks">0</strong><span>장바구니</span></div>
+      </div>
+    </section>
+    <section class="toolbar">
+      <label class="search-box"><i class="fa-solid fa-magnifying-glass"></i><input id="searchInput" type="search" placeholder="도서명, 저자, 등록번호, 청구기호 검색" autocomplete="off" /></label>
+      <select id="sortSelect" aria-label="정렬">
+        <option value="sourceNo">목록 순</option>
+        <option value="title">도서명 순</option>
+        <option value="year">출판년도 최신순</option>
+        <option value="price">가격 높은순</option>
+      </select>
+      <button type="button" class="icon-button active" data-view="list" aria-label="목록형"><i class="fa-solid fa-list"></i></button>
+      <button type="button" class="icon-button" data-view="grid" aria-label="격자형"><i class="fa-solid fa-table-cells-large"></i></button>
+    </section>
+    <section class="layout">
+      <aside class="filters">
+        <div class="filter-options">
+          <label><input type="checkbox" id="availableOnly" /> 신청 가능한 책만</label>
+          <label><input type="checkbox" id="hidePending" /> 신청 진행중 제외</label>
+        </div>
+        <div class="filter-head"><h2>카테고리</h2><button type="button" id="resetFilters">초기화</button></div>
+        <div id="categoryList" class="category-list"></div>
+      </aside>
+      <section class="results" aria-live="polite">
+        <div class="result-head"><div><strong id="resultCount">0</strong>권</div><button type="button" class="outline" id="refreshLive"><i class="fa-solid fa-rotate"></i> 신청상태 새로고침</button></div>
+        <div id="bookResults" class="book-results list-view"></div>
+        <div id="pager" class="pager"></div>
+      </section>
+    </section>
+  </main>
+  <button class="floating-cart" type="button" data-cart-open aria-label="장바구니 열기"><i class="fa-solid fa-cart-shopping"></i><span id="floatCartCount">0</span></button>
+  <aside class="drawer" id="cartDrawer" aria-hidden="true">
+    <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="cartTitle">
+      <div class="drawer-head"><h2 id="cartTitle">장바구니</h2><button type="button" data-cart-close aria-label="닫기"><i class="fa-solid fa-xmark"></i></button></div>
+      <div id="cartItems" class="cart-items"></div>
+      <div class="actions"><button type="button" class="ghost" id="clearCart">비우기</button><button type="button" class="primary" id="applyCart">신청하기</button></div>
+    </div>
+  </aside>
+  <div class="modal" id="bookModal" aria-hidden="true">
+    <div class="modal-panel detail" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+      <button class="close" type="button" data-modal-close aria-label="닫기"><i class="fa-solid fa-xmark"></i></button>
+      <div id="detailCover" class="detail-cover"></div>
+      <div>
+        <p id="detailCategory" class="tag"></p>
+        <h2 id="detailTitle"></h2>
+        <p id="detailAuthor" class="muted"></p>
+        <p id="detailMeta" class="muted"></p>
+        <p id="detailDescription" class="description"></p>
+        <div class="detail-actions">
+          <button type="button" class="primary" id="detailApply">바로 신청</button>
+          <button type="button" class="outline" id="detailCart">장바구니 담기</button>
+          <a id="detailPage" class="outline as-link">상세보기</a>
+          <a id="detailCatalog" class="text-link" target="_blank" rel="noopener">도서관 상세</a>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal" id="applyModal" aria-hidden="true">
+    <form class="modal-panel apply-form" id="applyForm" role="dialog" aria-modal="true" aria-labelledby="applyTitle">
+      <button class="close" type="button" data-apply-close aria-label="닫기"><i class="fa-solid fa-xmark"></i></button>
+      <h2 id="applyTitle">도서 신청</h2>
+      <p id="applySummary" class="muted"></p>
+      <label class="memo-only">메모<textarea name="memo" rows="3" placeholder="담당자에게 남길 말이 있으면 입력하세요."></textarea></label>
+      <div class="actions"><button type="button" class="ghost" data-apply-close>취소</button><button type="submit" class="primary">신청 제출</button></div>
+    </form>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>

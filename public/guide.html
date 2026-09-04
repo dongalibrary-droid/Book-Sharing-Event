@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="취업지원실 도서 나눔 행사 이용안내" />
+  <title>이용안내 | 취업지원실 도서 나눔 행사</title>
+  <link rel="icon" href="assets/images/search-icon-05.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body data-page="guide">
+  <script>
+    window.CAREER_BOOKS_CONFIG = {
+      appsScriptUrl: "https://script.google.com/macros/s/AKfycbxQrpdAeaKGvu-27715evDBXFt12FP6ooytHYzLt1wN_pWMdPyy47GGPgZQwESDbD7X/exec",
+      dataUrl: "assets/data/career-books.json"
+    };
+  </script>
+  <header class="site-header">
+    <div class="top-strip"><span>Dong-A University Library</span><span>80th Anniversary</span></div>
+    <div class="brand-row">
+      <a href="index.html"><img class="library-logo" src="assets/images/black-logo.png" alt="동아대학교 도서관" /></a>
+      <img class="anniversary-logo" src="assets/images/80logo.webp" alt="동아대학교 80주년" />
+    </div>
+    <nav class="nav">
+      <a href="catalog.html">도서목록</a>
+      <a href="status.html">신청 진행상황</a>
+      <a class="active" href="guide.html">이용안내</a>
+      <button type="button" data-cart-open><i class="fa-solid fa-cart-shopping"></i> 장바구니 <span id="navCartCount">0</span></button>
+      <div class="auth-area" id="authArea"></div>
+    </nav>
+  </header>
+  <main>
+    <section class="page-title">
+      <div>
+        <p class="eyebrow">Guide</p>
+        <h1>이용안내</h1>
+        <p>도서 나눔 행사는 신청 접수 후 담당자 확인을 거쳐 확정됩니다.</p>
+      </div>
+    </section>
+    <section class="guide guide-page">
+      <article><span>1</span><strong>로그인</strong><p>학번, 성명, 휴대폰번호를 입력하고 개인정보 수집 및 이용에 동의합니다.</p></article>
+      <article><span>2</span><strong>도서 선택</strong><p>도서목록에서 카테고리와 검색을 이용해 원하는 책을 찾습니다.</p></article>
+      <article><span>3</span><strong>신청</strong><p>바로 신청하거나 장바구니에 담아 여러 권을 한 번에 신청합니다.</p></article>
+      <article><span>4</span><strong>진행상황 확인</strong><p>신청 진행상황 페이지에서 본인이 신청한 도서와 상태를 확인합니다.</p></article>
+      <article><span>5</span><strong>신청 취소</strong><p>접수 상태의 신청은 진행상황 페이지에서 취소할 수 있습니다.</p></article>
+      <article><span>6</span><strong>수령</strong><p>확정 안내를 받은 뒤 지정된 장소와 시간에 도서를 수령합니다.</p></article>
+    </section>
+  </main>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>

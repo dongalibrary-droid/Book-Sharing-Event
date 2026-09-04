@@ -1,0 +1,9 @@
+{
+  "name": "dong-a-career-book-giveaway",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build:data": "python scripts/build-career-books.py",
+    "start": "python -m http.server 8088 -d public"
+  }
+}

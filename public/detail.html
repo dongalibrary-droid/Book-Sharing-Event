@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="취업지원실 도서 나눔 행사 도서 상세" />
+  <title>도서 상세 | 취업지원실 도서 나눔 행사</title>
+  <link rel="icon" href="assets/images/search-icon-05.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body data-page="detail">
+  <script>
+    window.CAREER_BOOKS_CONFIG = {
+      appsScriptUrl: "https://script.google.com/macros/s/AKfycbxQrpdAeaKGvu-27715evDBXFt12FP6ooytHYzLt1wN_pWMdPyy47GGPgZQwESDbD7X/exec",
+      dataUrl: "assets/data/career-books.json"
+    };
+  </script>
+  <header class="site-header">
+    <div class="top-strip"><span>Dong-A University Library</span><span>80th Anniversary</span></div>
+    <div class="brand-row">
+      <a href="index.html"><img class="library-logo" src="assets/images/black-logo.png" alt="동아대학교 도서관" /></a>
+      <img class="anniversary-logo" src="assets/images/80logo.webp" alt="동아대학교 80주년" />
+    </div>
+    <nav class="nav">
+      <a href="catalog.html">도서목록</a>
+      <a href="status.html">신청 진행상황</a>
+      <a href="guide.html">이용안내</a>
+      <button type="button" data-cart-open><i class="fa-solid fa-cart-shopping"></i> 장바구니 <span id="navCartCount">0</span></button>
+      <div class="auth-area" id="authArea"></div>
+    </nav>
+  </header>
+  <main>
+    <section class="book-detail-page" id="detailPageRoot">
+      <div class="detail-cover large" id="pageDetailCover"></div>
+      <div class="detail-main">
+        <p class="tag" id="pageDetailCategory"></p>
+        <h1 id="pageDetailTitle">도서 정보를 불러오는 중입니다.</h1>
+        <p class="muted" id="pageDetailAuthor"></p>
+        <p class="muted" id="pageDetailMeta"></p>
+        <div class="detail-actions">
+          <button type="button" class="primary" id="pageDetailApply">바로 신청</button>
+          <button type="button" class="outline" id="pageDetailCart">장바구니 담기</button>
+          <a class="ghost" href="catalog.html">목록으로</a>
+        </div>
+        <section class="book-description-panel">
+          <h2>책 소개</h2>
+          <p id="pageDetailDescription">책 소개를 불러오는 중입니다.</p>
+        </section>
+        <section class="book-extra-panel">
+          <h2>소장 정보</h2>
+          <dl>
+            <div><dt>등록번호</dt><dd id="pageRegistrationNo"></dd></div>
+            <div><dt>청구기호</dt><dd id="pageCallNo"></dd></div>
+            <div><dt>소장위치</dt><dd id="pageLocation"></dd></div>
+            <div><dt>도서관 상세</dt><dd><a id="pageCatalogLink" target="_blank" rel="noopener">바로가기</a></dd></div>
+          </dl>
+        </section>
+      </div>
+    </section>
+  </main>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
