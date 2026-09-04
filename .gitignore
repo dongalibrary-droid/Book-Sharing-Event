@@ -3,3 +3,4 @@ node_modules/
 Thumbs.db
 outputs/*.png
 Code-check.js
+~$*.xlsx
