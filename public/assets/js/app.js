@@ -22,6 +22,7 @@
 
   async function init() {
     ensureSharedUi();
+    ensureFooter();
     collectElements();
     renderAuth();
     bindCommon();
@@ -60,6 +61,13 @@
   }
 
   function ensureSharedUi() {
+    if (hasCart() && !document.querySelector(".floating-cart")) {
+      document.body.insertAdjacentHTML("beforeend", `
+        <button class="floating-cart" id="floatingCartButton" type="button" data-cart-open aria-label="장바구니 열기">
+          <i class="fa-solid fa-cart-shopping"></i><span id="floatCartCount">0</span>
+        </button>
+      `);
+    }
     if (hasCart() && !$("cartDrawer")) {
       document.body.insertAdjacentHTML("beforeend", `
         <aside class="drawer" id="cartDrawer" aria-hidden="true">
@@ -93,6 +101,59 @@
         </div>
       `);
     }
+  }
+
+  function ensureFooter() {
+    if (document.querySelector(".library-footer")) return;
+    const main = document.querySelector("main");
+    if (!main) return;
+    main.insertAdjacentHTML("afterend", `
+      <footer class="library-footer">
+        <div class="footer-links">
+          <a href="https://www.donga.ac.kr/kor/CMS/Contents/Contents.do?mCode=MN174" target="_blank" rel="noopener">개인정보처리방침</a>
+          <a href="https://library.donga.ac.kr/email-collection-denial/" target="_blank" rel="noopener">이메일주소무단수집거부</a>
+          <a href="https://library.donga.ac.kr/about/regulation/" target="_blank" rel="noopener">도서관 규정</a>
+          <a href="https://library.donga.ac.kr/about/location/" target="_blank" rel="noopener">찾아오시는 길</a>
+        </div>
+        <div class="footer-main">
+          <div class="footer-brand">
+            <img src="assets/images/white-logo.png" alt="동아대학교 도서관" />
+            <p>취업지원실 도서 나눔 행사</p>
+          </div>
+          <div class="footer-column">
+            <strong>Quick Menu</strong>
+            <a href="catalog.html">도서목록</a>
+            <a href="status.html">신청 진행상황</a>
+            <a href="guide.html">이용안내</a>
+            <a href="https://library.donga.ac.kr/" target="_blank" rel="noopener">도서관 홈페이지</a>
+          </div>
+          <div class="footer-column">
+            <strong>이용문의</strong>
+            <span>대출/반납 [한림] 051-200-6273</span>
+            <span>자료구입 051-200-6252</span>
+            <span>홈페이지/시스템장애 051-200-8430</span>
+          </div>
+          <div class="footer-column">
+            <strong>Family Sites</strong>
+            <a href="https://www.donga.ac.kr/" target="_blank" rel="noopener">동아대학교</a>
+            <a href="https://job.donga.ac.kr/" target="_blank" rel="noopener">취업지원실</a>
+            <a href="https://eclass.donga.ac.kr/" target="_blank" rel="noopener">가상대학</a>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <div>
+            <p>한림도서관 : 49315 부산광역시 사하구 낙동대로 550번길 37(하단동) Tel. 051-200-6273, 6252 / Fax. 051-200-6255</p>
+            <p>부민도서관 : 49236 부산광역시 서구 구덕로 225(부민동 2가) Tel. 051-200-8434 / Fax. 051-200-8435</p>
+            <p>Copyright Dong-A University Library. All Rights Reserved.</p>
+          </div>
+          <div class="footer-social">
+            <a href="https://www.youtube.com/@dongauniversitylibrary" target="_blank" rel="noopener" aria-label="유튜브"><i class="fa-brands fa-youtube"></i></a>
+            <a href="https://www.instagram.com/donga_library/" target="_blank" rel="noopener" aria-label="인스타그램"><i class="fa-brands fa-instagram"></i></a>
+            <a href="https://pf.kakao.com/_xixmxnxl" target="_blank" rel="noopener" aria-label="카카오톡"><i class="fa-solid fa-comment"></i></a>
+          </div>
+        </div>
+      </footer>
+    `);
   }
 
   function collectElements() {
@@ -562,6 +623,7 @@
   }
 
   function renderAuth() {
+    document.body.classList.toggle("logged-in", Boolean(state.user));
     if (!els.authArea) return;
     if (!state.user) {
       els.authArea.innerHTML = `<a class="login-link" href="index.html"><i class="fa-solid fa-right-to-bracket"></i> 로그인</a>`;
