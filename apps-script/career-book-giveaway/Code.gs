@@ -14,15 +14,25 @@ const CONFIG = {
 const BOOK_HEADERS = ["도서ID", "등록번호", "서명", "저자", "청구기호", "소장위치", "가격", "출판년도", "도서상세URL", "ISBN13", "카테고리", "상태", "신청가능수량", "신청중수량", "확정수량", "비고", "원본번호"];
 const REQUEST_HEADERS = ["신청ID", "신청일시", "상태", "학생명", "학번", "학과", "연락처", "이메일", "신청경로", "도서ID", "등록번호", "서명", "저자", "ISBN13", "메모", "처리자", "처리일시"];
 const USER_HEADERS = ["학번", "성명", "휴대폰번호", "개인정보동의", "최초로그인", "최근로그인", "로그인횟수"];
+const DEFAULT_SETTINGS = [
+  ["SITE_TITLE", "동아대학교 도서관 도서 나눔", "사이트와 로그인 화면에 표시되는 기본 행사명"],
+  ["SITE_EYEBROW", "Library Book Sharing", "로그인 화면 상단 보조 문구"],
+  ["SITE_DESCRIPTION", "학번, 성명, 휴대폰번호로 로그인하면 도서 신청과 진행상황 확인을 한 곳에서 관리할 수 있습니다.", "로그인 화면 안내 문구"],
+  ["FOOTER_TITLE", "동좌문도", "푸터 소개 제목"],
+  ["FOOTER_HEADING", "동아대학교 도서관", "푸터 소개 기관명"],
+  ["FOOTER_QUOTE", "“스승과 제자가 한자리에 앉아서 정도(正道)가 무엇인지 묻고 답한다.”", "푸터 소개 인용문"],
+  ["FOOTER_DESCRIPTION", "동아대학교 도서관도 함께 길을 물으며 설립자의 교육철학 이념을 따릅니다.", "푸터 소개 설명"],
+];
 
 function doGet(e) {
   try {
     const params = e.parameter || {};
     const action = String(params.action || "health");
-    if (action === "health") return json_({ ok: true, service: "Dong-A University Library Career Book Giveaway" });
+    if (action === "health") return json_({ ok: true, service: "Dong-A University Library Book Sharing" });
     if (action === "bookMeta") return json_({ ok: true, item: getBookMeta_(params) });
     if (action === "bookMetaBatch") return json_({ ok: true, items: getBookMetaBatch_(params) });
     ensureSheets_();
+    if (action === "settings") return json_({ ok: true, settings: readPublicSettings_() });
     if (action === "books") return json_({ ok: true, books: readBooks_() });
     if (action === "pending") return json_({ ok: true, entries: readPendingRequests_(params.refresh === "1") });
     if (action === "myRequests") return json_({ ok: true, entries: readMyRequests_(params) });
@@ -211,6 +221,22 @@ function readBooks_() {
   return values.slice(1).map(function (row) { return rowToBook_(row, indexes); }).filter(function (book) { return book.bookId && book.title; });
 }
 
+function readPublicSettings_() {
+  const sheet = getSpreadsheet_().getSheetByName(CONFIG.SETTINGS_SHEET_NAME);
+  const settings = {};
+  DEFAULT_SETTINGS.forEach(function (row) { settings[row[0]] = row[1]; });
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return settings;
+  const values = sheet.getRange(2, 1, lastRow - 1, 2).getDisplayValues();
+  values.forEach(function (row) {
+    const key = String(row[0] || "").trim();
+    if (!settings.hasOwnProperty(key)) return;
+    const value = String(row[1] || "").trim();
+    if (value) settings[key] = value;
+  });
+  return settings;
+}
+
 function readPendingRequests_(forceRefresh) {
   const cache = CacheService.getScriptCache();
   const cached = forceRefresh ? "" : cache.get("careerBookPending");
@@ -388,7 +414,8 @@ function ensureSheets_() {
   ensureSheet_(ss, CONFIG.BOOK_SHEET_NAME, BOOK_HEADERS);
   ensureSheet_(ss, CONFIG.REQUEST_SHEET_NAME, REQUEST_HEADERS);
   ensureSheet_(ss, CONFIG.USER_SHEET_NAME, USER_HEADERS);
-  ensureSheet_(ss, CONFIG.SETTINGS_SHEET_NAME, ["설정항목", "값", "비고"]);
+  const settingsSheet = ensureSheet_(ss, CONFIG.SETTINGS_SHEET_NAME, ["설정항목", "값", "비고"]);
+  ensureDefaultSettings_(settingsSheet);
 }
 
 function ensureSheet_(ss, name, headers) {
@@ -398,6 +425,19 @@ function ensureSheet_(ss, name, headers) {
     sheet.setFrozenRows(1);
   }
   return sheet;
+}
+
+function ensureDefaultSettings_(sheet) {
+  const lastRow = sheet.getLastRow();
+  const existing = {};
+  if (lastRow >= 2) {
+    sheet.getRange(2, 1, lastRow - 1, 1).getDisplayValues().forEach(function (row) {
+      const key = String(row[0] || "").trim();
+      if (key) existing[key] = true;
+    });
+  }
+  const rows = DEFAULT_SETTINGS.filter(function (row) { return !existing[row[0]]; });
+  if (rows.length) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 3).setValues(rows);
 }
 
 function getSpreadsheet_() {

@@ -1,6 +1,6 @@
-# 동아대학교 도서관 취업지원실 도서 나눔 행사
+# 동아대학교 도서관 도서 나눔
 
-학생들이 취업지원실 도서를 온라인 서점처럼 검색하고, 개별 신청 또는 장바구니 신청을 할 수 있는 정적 웹사이트입니다.
+학생들이 도서 나눔 대상 도서를 온라인 서점처럼 검색하고, 개별 신청 또는 장바구니 신청을 할 수 있는 정적 웹사이트입니다.
 
 ## 구성
 
@@ -27,3 +27,12 @@ PowerShell 실행 정책 때문에 `npm`이 막히면 아래처럼 실행해도 
 ```bash
 python scripts/build-career-books.py
 ```
+
+## 운영 문구
+
+Apps Script의 `setupCareerBookGiveawaySheets`를 실행하면 구글시트 `설정` 시트에 사이트 문구 항목이 자동으로 준비됩니다.
+
+- `SITE_TITLE`: 로그인 화면과 브라우저 제목에 표시되는 행사명
+- `SITE_EYEBROW`: 로그인 화면 상단 보조 문구
+- `SITE_DESCRIPTION`: 로그인 화면 안내 문구
+- `FOOTER_TITLE`, `FOOTER_HEADING`, `FOOTER_QUOTE`, `FOOTER_DESCRIPTION`: 하단 푸터 소개 문구

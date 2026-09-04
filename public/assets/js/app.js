@@ -1,5 +1,14 @@
 (function () {
   const config = window.CAREER_BOOKS_CONFIG || {};
+  const siteDefaults = {
+    SITE_TITLE: "동아대학교 도서관 도서 나눔",
+    SITE_EYEBROW: "Library Book Sharing",
+    SITE_DESCRIPTION: "학번, 성명, 휴대폰번호로 로그인하면 도서 신청과 진행상황 확인을 한 곳에서 관리할 수 있습니다.",
+    FOOTER_TITLE: "동좌문도",
+    FOOTER_HEADING: "동아대학교 도서관",
+    FOOTER_QUOTE: "“스승과 제자가 한자리에 앉아서 정도(正道)가 무엇인지 묻고 답한다.”",
+    FOOTER_DESCRIPTION: "동아대학교 도서관도 함께 길을 물으며 설립자의 교육철학 이념을 따릅니다.",
+  };
   const pageName = document.body.dataset.page || "catalog";
   const state = {
     books: [],
@@ -13,6 +22,7 @@
     activeBook: null,
     myRequests: [],
     selectedRequestIds: new Set(),
+    siteSettings: { ...siteDefaults },
     coverCache: loadJson("careerBookCoverCache", {}),
     cart: loadJson("careerBookCart", []),
     user: loadJson("careerBookUser", null),
@@ -29,6 +39,8 @@
     collectElements();
     renderAuth();
     bindCommon();
+    applySiteSettings();
+    loadSiteSettings();
 
     if (pageName === "login") {
       if (state.user) {
@@ -132,7 +144,12 @@
         <div class="footer-main">
           <div class="footer-brand">
             <img src="assets/images/white-logo.png" alt="동아대학교 도서관" />
-            <p>취업지원실 도서 나눔 행사</p>
+            <div class="footer-about">
+              <strong data-setting="FOOTER_TITLE">동좌문도</strong>
+              <span data-setting="FOOTER_HEADING">동아대학교 도서관</span>
+              <p data-setting="FOOTER_QUOTE">“스승과 제자가 한자리에 앉아서 정도(正道)가 무엇인지 묻고 답한다.”</p>
+              <p data-setting="FOOTER_DESCRIPTION">동아대학교 도서관도 함께 길을 물으며 설립자의 교육철학 이념을 따릅니다.</p>
+            </div>
           </div>
           <div class="footer-column">
             <strong>Quick Menu</strong>
@@ -231,6 +248,32 @@
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeAll();
     });
+  }
+
+  async function loadSiteSettings() {
+    if (!config.appsScriptUrl) return;
+    try {
+      const payload = await getFromSheet({ action: "settings" });
+      if (!payload.ok || !payload.settings) return;
+      state.siteSettings = { ...state.siteSettings, ...payload.settings };
+      applySiteSettings();
+    } catch (error) {
+      // Settings are optional; the static defaults keep the site usable.
+    }
+  }
+
+  function applySiteSettings() {
+    const settings = state.siteSettings;
+    document.querySelectorAll("[data-setting]").forEach((element) => {
+      const value = settings[element.dataset.setting];
+      if (value) element.textContent = value;
+    });
+    const siteTitle = settings.SITE_TITLE || siteDefaults.SITE_TITLE;
+    if (pageName === "login") document.title = `로그인 | ${siteTitle}`;
+    if (pageName === "catalog") document.title = `도서목록 | ${siteTitle}`;
+    if (pageName === "status") document.title = `신청 진행상황 | ${siteTitle}`;
+    if (pageName === "guide") document.title = `이용안내 | ${siteTitle}`;
+    if (pageName === "detail" && !state.activeBook) document.title = `도서 상세 | ${siteTitle}`;
   }
 
   function bindLogin() {
@@ -505,14 +548,14 @@
       return;
     }
     state.activeBook = book;
-    document.title = `${book.title} | 취업지원실 도서 나눔 행사`;
+    document.title = `${book.title} | ${state.siteSettings.SITE_TITLE || siteDefaults.SITE_TITLE}`;
     els.pageDetailCategory.textContent = book.category;
     els.pageDetailTitle.textContent = book.title;
     els.pageDetailAuthor.textContent = book.author || "저자 정보 없음";
     els.pageDetailMeta.textContent = `${book.publicationYear || "연도 미상"} · ${book.price ? `${fmt(book.price)}원` : "가격 정보 없음"}`;
     els.pageRegistrationNo.textContent = book.registrationNo;
     els.pageCallNo.textContent = book.callNo || "청구기호 없음";
-    els.pageLocation.textContent = book.location || "취업지원실";
+    els.pageLocation.textContent = book.location || "동아대학교 도서관";
     els.pageCatalogLink.href = book.detailUrl || "#";
     els.pageDetailCover.innerHTML = cover(book);
     els.pageDetailDescription.textContent = "책 소개를 불러오는 중입니다.";

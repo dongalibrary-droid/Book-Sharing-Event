@@ -207,7 +207,10 @@ body.logged-in .floating-cart { display: inline-flex; align-items: center; justi
 .footer-links a:first-child { padding-left: 0; color: #fff; }
 .footer-main { max-width: 1280px; margin: 0 auto; padding: 34px 24px 28px; display: grid; grid-template-columns: minmax(260px,1.5fr) repeat(3,minmax(160px,1fr)); gap: 28px; }
 .footer-brand img { width: 300px; max-width: 100%; height: auto; object-fit: contain; object-position: left center; filter: drop-shadow(0 4px 10px rgba(0,0,0,.12)); }
-.footer-brand p { margin: 18px 0 0; color: #fff; font-size: 18px; font-weight: 800; }
+.footer-about { display: grid; gap: 7px; margin-top: 18px; max-width: 470px; }
+.footer-about strong { color: #fff; font-size: 22px; line-height: 1.25; }
+.footer-about span { color: rgba(255,255,255,.92); font-size: 16px; font-weight: 800; }
+.footer-about p { margin: 0; color: rgba(255,255,255,.74); font-size: 14px; line-height: 1.65; word-break: keep-all; }
 .footer-column { display: grid; align-content: start; gap: 9px; }
 .footer-column strong { margin-bottom: 6px; color: #fff; font-size: 17px; }
 .footer-column a, .footer-column span { color: rgba(255,255,255,.72); font-size: 14px; line-height: 1.5; }
