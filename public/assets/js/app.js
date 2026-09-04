@@ -11,6 +11,7 @@
     perPage: 25,
     selectedBooks: [],
     activeBook: null,
+    coverCache: loadJson("careerBookCoverCache", {}),
     cart: loadJson("careerBookCart", []),
     user: loadJson("careerBookUser", null),
   };
@@ -111,9 +112,9 @@
       <footer class="library-footer">
         <div class="footer-links">
           <a href="https://www.donga.ac.kr/kor/CMS/Contents/Contents.do?mCode=MN174" target="_blank" rel="noopener">개인정보처리방침</a>
-          <a href="https://library.donga.ac.kr/email-collection-denial/" target="_blank" rel="noopener">이메일주소무단수집거부</a>
-          <a href="https://library.donga.ac.kr/about/regulation/" target="_blank" rel="noopener">도서관 규정</a>
-          <a href="https://library.donga.ac.kr/about/location/" target="_blank" rel="noopener">찾아오시는 길</a>
+          <a href="https://library.donga.ac.kr/" target="_blank" rel="noopener">도서관 홈페이지</a>
+          <a href="https://library.donga.ac.kr/about-our-library/overview/regulations/" target="_blank" rel="noopener">도서관 규정</a>
+          <a href="https://library.donga.ac.kr/about-our-library/library-hours/" target="_blank" rel="noopener">도서관 이용시간</a>
         </div>
         <div class="footer-main">
           <div class="footer-brand">
@@ -125,12 +126,16 @@
             <a href="catalog.html">도서목록</a>
             <a href="status.html">신청 진행상황</a>
             <a href="guide.html">이용안내</a>
-            <a href="https://library.donga.ac.kr/" target="_blank" rel="noopener">도서관 홈페이지</a>
+            <a href="https://library.donga.ac.kr/resource/" target="_blank" rel="noopener">자료검색</a>
+            <a href="https://library.donga.ac.kr/research-support/library-instruction/library-instruction-guide/" target="_blank" rel="noopener">이용교육</a>
+            <a href="https://library.donga.ac.kr/resource/databases/" target="_blank" rel="noopener">학술DB</a>
           </div>
           <div class="footer-column">
             <strong>이용문의</strong>
             <span>대출/반납 [한림] 051-200-6273</span>
+            <span>대출/반납 [부민] 051-200-8434</span>
             <span>자료구입 051-200-6252</span>
+            <span>상호대차/원문복사 051-200-6262</span>
             <span>홈페이지/시스템장애 051-200-8430</span>
           </div>
           <div class="footer-column">
@@ -144,12 +149,9 @@
           <div>
             <p>한림도서관 : 49315 부산광역시 사하구 낙동대로 550번길 37(하단동) Tel. 051-200-6273, 6252 / Fax. 051-200-6255</p>
             <p>부민도서관 : 49236 부산광역시 서구 구덕로 225(부민동 2가) Tel. 051-200-8434 / Fax. 051-200-8435</p>
+            <p>법학도서분관 : 49236 부산광역시 서구 구덕로 225(부민동 2가) Tel. 051-200-8441 / Fax. 051-200-8443</p>
+            <p>의학도서분관 : 49201 부산광역시 서구 대신공원로 32(동대신동 3가) Tel. 051-240-2938 / Fax. 051-240-2666</p>
             <p>Copyright Dong-A University Library. All Rights Reserved.</p>
-          </div>
-          <div class="footer-social">
-            <a href="https://www.youtube.com/@dongauniversitylibrary" target="_blank" rel="noopener" aria-label="유튜브"><i class="fa-brands fa-youtube"></i></a>
-            <a href="https://www.instagram.com/donga_library/" target="_blank" rel="noopener" aria-label="인스타그램"><i class="fa-brands fa-instagram"></i></a>
-            <a href="https://pf.kakao.com/_xixmxnxl" target="_blank" rel="noopener" aria-label="카카오톡"><i class="fa-solid fa-comment"></i></a>
           </div>
         </div>
       </footer>
@@ -161,7 +163,7 @@
       "authArea", "toast", "loginForm", "totalBooks", "availableBooks", "cartBooks",
       "navCartCount", "floatCartCount", "searchInput", "sortSelect", "categoryList",
       "resetFilters", "availableOnly", "hidePending", "resultCount", "refreshLive",
-      "bookResults", "pager", "cartDrawer", "cartItems", "clearCart", "applyCart",
+      "bookResults", "pagerTop", "pager", "cartDrawer", "cartItems", "clearCart", "applyCart",
       "bookModal", "detailCover", "detailCategory", "detailTitle", "detailAuthor",
       "detailMeta", "detailDescription", "detailApply", "detailCart", "detailPage",
       "detailCatalog", "applyModal", "applyForm", "applySummary", "myRequestCount",
@@ -375,6 +377,7 @@
     els.bookResults.querySelectorAll("[data-cart-book]").forEach((button) => button.addEventListener("click", () => addCart(button.dataset.cartBook)));
     els.bookResults.querySelectorAll("[data-apply-book]").forEach((button) => button.addEventListener("click", () => openApply([findBook(button.dataset.applyBook)], "single")));
     renderPager(pages);
+    hydrateVisibleCovers(pageItems);
   }
 
   function renderBookCard(book) {
@@ -404,19 +407,32 @@
   }
 
   function renderPager(pageCount) {
-    if (pageCount <= 1) {
-      els.pager.innerHTML = "";
-      return;
-    }
-    const pages = new Set([1, pageCount, state.page - 1, state.page, state.page + 1]);
-    for (let i = 1; i <= Math.min(5, pageCount); i += 1) pages.add(i);
+    const html = pageCount <= 1 ? "" : pagerHtml(pageCount);
+    [els.pagerTop, els.pager].filter(Boolean).forEach((pager) => {
+      pager.innerHTML = html;
+      pager.querySelectorAll("button[data-page]").forEach((button) => button.addEventListener("click", () => {
+        state.page = Number(button.dataset.page);
+        renderBooks();
+        document.querySelector(".results").scrollIntoView({ behavior: "smooth", block: "start" });
+      }));
+    });
+  }
+
+  function pagerHtml(pageCount) {
+    const pages = new Set([1, pageCount]);
+    for (let value = state.page - 2; value <= state.page + 2; value += 1) pages.add(value);
     const ordered = Array.from(pages).filter((value) => value >= 1 && value <= pageCount).sort((a, b) => a - b);
-    els.pager.innerHTML = ordered.map((value, index) => `${index > 0 && value - ordered[index - 1] > 1 ? `<span class="empty">...</span>` : ""}<button type="button" class="${value === state.page ? "active" : ""}" data-page="${value}">${value}</button>`).join("");
-    els.pager.querySelectorAll("button").forEach((button) => button.addEventListener("click", () => {
-      state.page = Number(button.dataset.page);
-      renderBooks();
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }));
+    const pageButtons = ordered.map((value, index) => {
+      const gap = index > 0 && value - ordered[index - 1] > 1 ? `<span class="pager-gap">...</span>` : "";
+      return `${gap}<button type="button" class="${value === state.page ? "active" : ""}" data-page="${value}" aria-label="${value}페이지">${value}</button>`;
+    }).join("");
+    return `
+      <button type="button" data-page="1" ${state.page === 1 ? "disabled" : ""}>처음</button>
+      <button type="button" data-page="${Math.max(1, state.page - 1)}" ${state.page === 1 ? "disabled" : ""}>이전</button>
+      ${pageButtons}
+      <button type="button" data-page="${Math.min(pageCount, state.page + 1)}" ${state.page === pageCount ? "disabled" : ""}>다음</button>
+      <button type="button" data-page="${pageCount}" ${state.page === pageCount ? "disabled" : ""}>끝</button>
+    `;
   }
 
   async function openPreview(book) {
@@ -464,6 +480,7 @@
 
   async function metaFromAladin(book) {
     if (!config.appsScriptUrl) return null;
+    if (state.coverCache[book.bookId]) return state.coverCache[book.bookId];
     try {
       const payload = await getFromSheet({
         action: "bookMeta",
@@ -472,7 +489,12 @@
         author: book.author || "",
         isbn13: book.isbn13 || "",
       });
-      return payload.ok ? payload.item : null;
+      const item = payload.ok ? payload.item : null;
+      if (item && (item.cover || item.description)) {
+        state.coverCache[book.bookId] = item;
+        saveJson("careerBookCoverCache", state.coverCache);
+      }
+      return item;
     } catch (error) {
       return null;
     }
@@ -655,7 +677,57 @@
   }
 
   function cover(book) {
-    return `<div class="cover"><strong>${html(book.title)}</strong><span>${html(book.category)}</span></div>`;
+    const meta = state.coverCache[book.bookId] || {};
+    if (book.cover || meta.cover) {
+      return `<div class="cover image-cover" data-cover-book="${attr(book.bookId)}"><img src="${attr(book.cover || meta.cover)}" alt="${attr(book.title)} 표지" loading="lazy" /></div>`;
+    }
+    return `<div class="cover" data-cover-book="${attr(book.bookId)}"><strong>${html(book.title)}</strong><span>${html(book.category)}</span></div>`;
+  }
+
+  async function hydrateVisibleCovers(books) {
+    if (!config.appsScriptUrl) return;
+    const missing = books
+      .filter((book) => book && !book.cover && !(state.coverCache[book.bookId] && state.coverCache[book.bookId].cover))
+      .slice(0, 25)
+      .map((book) => ({
+        bookId: book.bookId,
+        title: book.title,
+        author: book.author || "",
+        isbn13: book.isbn13 || "",
+      }));
+    if (!missing.length) return;
+
+    try {
+      const payload = await postToSheet({ action: "bookMetaBatch", items: missing });
+      if (payload.ok && payload.items) {
+        Object.keys(payload.items).forEach((bookId) => {
+          const meta = payload.items[bookId];
+          if (!meta || (!meta.cover && !meta.description)) return;
+          state.coverCache[bookId] = meta;
+          updateCoverElement(bookId, meta);
+        });
+        saveJson("careerBookCoverCache", state.coverCache);
+        return;
+      }
+    } catch (error) {
+      // Older Apps Script deployments do not know bookMetaBatch yet.
+    }
+
+    const fallback = missing.slice(0, 8);
+    for (let index = 0; index < fallback.length; index += 1) {
+      const book = findBook(fallback[index].bookId);
+      if (!book) continue;
+      const meta = await metaFromAladin(book);
+      if (meta && meta.cover) updateCoverElement(book.bookId, meta);
+    }
+  }
+
+  function updateCoverElement(bookId, meta) {
+    if (!meta || !meta.cover) return;
+    document.querySelectorAll(`[data-cover-book="${cssEscape(bookId)}"]`).forEach((element) => {
+      element.classList.add("image-cover");
+      element.innerHTML = `<img src="${attr(meta.cover)}" alt="도서 표지" loading="lazy" />`;
+    });
   }
 
   function hasCart() {
@@ -760,5 +832,10 @@
 
   function attr(value) {
     return html(value).replace(/`/g, "&#96;");
+  }
+
+  function cssEscape(value) {
+    if (window.CSS && CSS.escape) return CSS.escape(value);
+    return String(value || "").replace(/"/g, '\\"');
   }
 })();

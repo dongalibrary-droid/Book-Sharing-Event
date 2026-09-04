@@ -8,6 +8,7 @@ const CONFIG = {
   META_CACHE_SECONDS: 21600,
   PENDING_CACHE_SECONDS: 60,
   MAX_BOOKS_PER_REQUEST: 20,
+  MAX_META_BATCH_SIZE: 25,
 };
 
 const BOOK_HEADERS = ["도서ID", "등록번호", "서명", "저자", "청구기호", "소장위치", "가격", "출판년도", "도서상세URL", "ISBN13", "카테고리", "상태", "신청가능수량", "신청중수량", "확정수량", "비고", "원본번호"];
@@ -20,6 +21,7 @@ function doGet(e) {
     const action = String(params.action || "health");
     if (action === "health") return json_({ ok: true, service: "Dong-A University Library Career Book Giveaway" });
     if (action === "bookMeta") return json_({ ok: true, item: getBookMeta_(params) });
+    if (action === "bookMetaBatch") return json_({ ok: true, items: getBookMetaBatch_(params) });
     ensureSheets_();
     if (action === "books") return json_({ ok: true, books: readBooks_() });
     if (action === "pending") return json_({ ok: true, entries: readPendingRequests_() });
@@ -32,8 +34,9 @@ function doGet(e) {
 
 function doPost(e) {
   try {
-    ensureSheets_();
     const payload = parsePost_(e);
+    if (payload.action === "bookMetaBatch") return json_({ ok: true, items: getBookMetaBatch_(payload) });
+    ensureSheets_();
     if (payload.action === "login") return json_(loginUser_(payload));
     if (payload.action === "submitApplication") return json_(submitApplication_(payload));
     if (payload.action === "cancelApplication") return json_(cancelApplication_(payload));
@@ -250,12 +253,38 @@ function getBookMeta_(params) {
   return normalized;
 }
 
+function getBookMetaBatch_(params) {
+  const items = parseMetaItems_(params.items);
+  const result = {};
+  items.slice(0, CONFIG.MAX_META_BATCH_SIZE).forEach(function (item) {
+    const bookId = String(item.bookId || "").trim();
+    if (!bookId) return;
+    result[bookId] = getBookMeta_(item);
+  });
+  return result;
+}
+
 function aladinLookupByIsbn_(key, isbn13) {
   return fetchAladinFirstItem_(CONFIG.ALADIN_API_BASE + "ItemLookUp.aspx?" + toQuery_({ ttbkey: key, itemIdType: "ISBN13", ItemId: isbn13, output: "js", Version: CONFIG.ALADIN_VERSION, Cover: "Big" }));
 }
 
 function aladinSearchByTitle_(key, title, author) {
-  return fetchAladinFirstItem_(CONFIG.ALADIN_API_BASE + "ItemSearch.aspx?" + toQuery_({ ttbkey: key, Query: author ? title + " " + author : title, QueryType: "Keyword", SearchTarget: "Book", MaxResults: 1, start: 1, output: "js", Version: CONFIG.ALADIN_VERSION, Cover: "Big" }));
+  const queries = buildAladinQueries_(title, author);
+  for (let index = 0; index < queries.length; index += 1) {
+    const item = fetchAladinFirstItem_(CONFIG.ALADIN_API_BASE + "ItemSearch.aspx?" + toQuery_({
+      ttbkey: key,
+      Query: queries[index].query,
+      QueryType: queries[index].type,
+      SearchTarget: "Book",
+      MaxResults: 1,
+      start: 1,
+      output: "js",
+      Version: CONFIG.ALADIN_VERSION,
+      Cover: "Big"
+    }));
+    if (item) return item;
+  }
+  return null;
 }
 
 function fetchAladinFirstItem_(url) {
@@ -268,6 +297,50 @@ function fetchAladinFirstItem_(url) {
 function normalizeAladinItem_(item) {
   if (!item) return { title: "", author: "", publisher: "", pubDate: "", description: "", cover: "", isbn13: "", link: "" };
   return { title: item.title || "", author: item.author || "", publisher: item.publisher || "", pubDate: item.pubDate || "", description: item.description || "", cover: item.cover || "", isbn13: item.isbn13 || "", link: item.link || "" };
+}
+
+function buildAladinQueries_(title, author) {
+  const cleanTitle = cleanSearchText_(title);
+  const cleanAuthor = cleanAuthorText_(author);
+  const titleWithoutSubtitle = cleanTitle.split(/[:：-]/)[0].trim();
+  const titleWithoutBrackets = cleanTitle.replace(/\([^)]*\)/g, "").replace(/\[[^\]]*\]/g, "").trim();
+  const queries = [];
+
+  addAladinQuery_(queries, "Title", cleanTitle);
+  addAladinQuery_(queries, "Keyword", cleanAuthor ? cleanTitle + " " + cleanAuthor : cleanTitle);
+  addAladinQuery_(queries, "Title", titleWithoutSubtitle);
+  addAladinQuery_(queries, "Keyword", cleanAuthor ? titleWithoutSubtitle + " " + cleanAuthor : titleWithoutSubtitle);
+  addAladinQuery_(queries, "Title", titleWithoutBrackets);
+  addAladinQuery_(queries, "Keyword", cleanAuthor ? titleWithoutBrackets + " " + cleanAuthor : titleWithoutBrackets);
+
+  return queries;
+}
+
+function addAladinQuery_(queries, type, query) {
+  const text = String(query || "").trim().replace(/\s+/g, " ");
+  if (!text || text.length < 2) return;
+  const key = type + ":" + text;
+  for (let index = 0; index < queries.length; index += 1) {
+    if (queries[index].key === key) return;
+  }
+  queries.push({ key: key, type: type, query: text });
+}
+
+function cleanSearchText_(value) {
+  return String(value || "")
+    .replace(/[“”"']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanAuthorText_(value) {
+  return String(value || "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/지음|저자|엮음|옮김|저|역/g, "")
+    .split(/[,;·|\/]/)[0]
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function getBookMap_() {
@@ -353,6 +426,17 @@ function cell_(row, indexes, header) {
 function parsePost_(e) {
   if (!e || !e.postData || !e.postData.contents) throw new Error("요청 본문이 비어 있습니다.");
   return JSON.parse(e.postData.contents);
+}
+
+function parseMetaItems_(value) {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(String(value));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
 }
 
 function requireText_(value, label) {
