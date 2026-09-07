@@ -10,13 +10,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/styles.css?v=20260904-8" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=20260907-1" />
 </head>
 <body data-page="login">
   <script>
     window.CAREER_BOOKS_CONFIG = {
       appsScriptUrl: "https://script.google.com/macros/s/AKfycbxQrpdAeaKGvu-27715evDBXFt12FP6ooytHYzLt1wN_pWMdPyy47GGPgZQwESDbD7X/exec",
-      dataUrl: "assets/data/career-books.json?v=20260904-8"
+      dataUrl: "assets/data/career-books.json?v=20260907-1"
     };
   </script>
   <header class="site-header">
@@ -41,13 +41,13 @@
         <p data-setting="SITE_DESCRIPTION">로그인 후 도서 신청과 진행상황 확인을 한 곳에서 관리할 수 있습니다.</p>
       </div>
       <form class="login-card" id="loginForm">
-        <h2>학생 로그인</h2>
-        <label>학번<input name="studentId" required inputmode="numeric" autocomplete="username" /></label>
+        <h2>학생/교원 로그인</h2>
+        <label>학번/교번<input name="studentId" required inputmode="numeric" autocomplete="username" /></label>
         <label>성명<input name="studentName" required autocomplete="name" /></label>
         <label>휴대폰번호<input name="phone" required inputmode="tel" autocomplete="tel" placeholder="010-0000-0000" /></label>
         <div class="privacy-box">
           <strong>개인정보 수집 및 이용 안내</strong>
-          <p>도서 신청 접수와 본인 신청내역 확인을 위해 학번, 성명, 휴대폰번호, 신청 도서 정보가 수집되며 행사 운영 종료 후 내부 기준에 따라 보관 또는 삭제됩니다.</p>
+          <p>도서 신청 접수와 본인 신청내역 확인을 위해 학번/교번, 성명, 휴대폰번호, 신청 도서 정보가 수집되며 행사 운영 종료 후 내부 기준에 따라 보관 또는 삭제됩니다.</p>
           <label><input type="checkbox" name="privacyConsent" required /> 개인정보 수집 및 이용에 동의합니다.</label>
         </div>
         <button class="primary wide" type="submit">로그인하고 도서 보러가기</button>
@@ -55,6 +55,6 @@
     </section>
   </main>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="assets/js/app.js?v=20260904-8"></script>
+  <script src="assets/js/app.js?v=20260907-1"></script>
 </body>
 </html>
