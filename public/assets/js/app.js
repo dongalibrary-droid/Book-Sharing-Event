@@ -14,6 +14,13 @@
     FOOTER_QUOTE: "“스승과 제자가 한자리에 앉아서 정도(正道)가 무엇인지 묻고 답한다.”",
     FOOTER_DESCRIPTION: "동아대학교 도서관도 함께 길을 물으며 설립자의 교육철학 이념을 따릅니다.",
   };
+
+  function normalizeTerminology(value) {
+    return String(value || "")
+      .replace(/교원/g, "교직원")
+      .replace(/교번/g, "직번");
+  }
+
   const pageName = document.body.dataset.page || "catalog";
   const state = {
     books: [],
@@ -275,12 +282,12 @@
   function applySiteSettings(options = {}) {
     const settings = state.siteSettings;
     document.querySelectorAll("[data-setting]").forEach((element) => {
-      const value = settings[element.dataset.setting];
+      const value = normalizeTerminology(settings[element.dataset.setting]);
       if (!value || element.textContent === value) return;
       if (options.typing) typeSettingText(element, value);
       else element.textContent = value;
     });
-    const siteTitle = settings.SITE_TITLE || siteDefaults.SITE_TITLE;
+    const siteTitle = normalizeTerminology(settings.SITE_TITLE || siteDefaults.SITE_TITLE);
     if (pageName === "login") document.title = `로그인 | ${siteTitle}`;
     if (pageName === "catalog") document.title = `도서목록 | ${siteTitle}`;
     if (pageName === "status") document.title = `신청 진행상황 | ${siteTitle}`;
@@ -289,7 +296,7 @@
   }
 
   function typeSettingText(element, value) {
-    const text = String(value || "");
+    const text = normalizeTerminology(value);
     const previousTimer = Number(element.dataset.typingTimer || 0);
     if (previousTimer) window.clearInterval(previousTimer);
     element.textContent = "";
@@ -921,7 +928,7 @@
     if (/Illegal spreadsheet id or key/i.test(text)) {
       return "구글시트 연결 설정이 올바르지 않습니다. 담당자에게 SPREADSHEET_ID 확인을 요청해주세요.";
     }
-    return text || "처리 중 오류가 발생했습니다.";
+    return normalizeTerminology(text || "처리 중 오류가 발생했습니다.");
   }
 
   function updateApplySummary() {
@@ -1192,7 +1199,7 @@
 
   function toast(message) {
     if (!els.toast) return;
-    els.toast.textContent = message;
+    els.toast.textContent = normalizeTerminology(message);
     els.toast.classList.add("show");
     clearTimeout(toast.timer);
     toast.timer = setTimeout(() => els.toast.classList.remove("show"), 2600);

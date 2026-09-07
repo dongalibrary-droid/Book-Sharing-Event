@@ -224,7 +224,7 @@ function readBooks_() {
 function readPublicSettings_() {
   const sheet = getSpreadsheet_().getSheetByName(CONFIG.SETTINGS_SHEET_NAME);
   const settings = {};
-  DEFAULT_SETTINGS.forEach(function (row) { settings[row[0]] = row[1]; });
+  DEFAULT_SETTINGS.forEach(function (row) { settings[row[0]] = normalizeTerminology_(row[1]); });
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return settings;
   const values = sheet.getRange(2, 1, lastRow - 1, 2).getDisplayValues();
@@ -232,7 +232,7 @@ function readPublicSettings_() {
     const key = String(row[0] || "").trim();
     if (!settings.hasOwnProperty(key)) return;
     const value = String(row[1] || "").trim();
-    if (value) settings[key] = value;
+    if (value) settings[key] = normalizeTerminology_(value);
   });
   return settings;
 }
@@ -496,6 +496,10 @@ function requireText_(value, label) {
 
 function normalizePhone_(value) {
   return String(value || "").replace(/[^0-9]/g, "");
+}
+
+function normalizeTerminology_(value) {
+  return String(value || "").replace(/교원/g, "교직원").replace(/교번/g, "직번");
 }
 
 function toQuery_(params) {
