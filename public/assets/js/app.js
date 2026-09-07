@@ -1,6 +1,9 @@
 (function () {
   const config = window.CAREER_BOOKS_CONFIG || {};
   const SETTINGS_TYPE_DELAY_MS = 5000;
+  const COVER_PRIORITY_BATCH_SIZE = 6;
+  const COVER_BACKGROUND_BATCH_SIZE = 8;
+  const COVER_BACKGROUND_DELAY_MS = 180;
   const settingsStartedAt = Date.now();
   const siteDefaults = {
     SITE_TITLE: "도서 나눔 플랫폼",
@@ -24,6 +27,7 @@
     activeBook: null,
     myRequests: [],
     selectedRequestIds: new Set(),
+    coverHydrationId: 0,
     siteSettings: { ...siteDefaults },
     coverCache: loadJson("careerBookCoverCache", {}),
     cart: loadJson("careerBookCart", []),
@@ -423,20 +427,24 @@
     updateSummaryCounts();
   }
 
-  async function refreshPending(manual) {
+  async function refreshPending(manual, options = {}) {
+    const forceRefresh = Boolean(manual || options.force);
+    const silent = Boolean(options.silent);
     if (!config.appsScriptUrl) {
-      if (manual) toast("신청 상태를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.");
+      if (manual && !silent) toast("신청 상태를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.");
       return;
     }
     try {
-      const payload = await getFromSheet({ action: "pending", refresh: manual ? "1" : "" });
+      const payload = await getFromSheet({ action: "pending", refresh: forceRefresh ? "1" : "" });
       const entries = payload.entries || [];
       state.pendingIds = new Set(entries.map((entry) => entry.bookId).filter(Boolean));
       updateSummaryCounts();
       if (pageName === "catalog") filterBooks();
-      if (manual) toast("신청 상태를 새로 확인했습니다.");
+      if (pageName === "detail") updateActiveBookActions();
+      updateCart();
+      if (manual && !silent) toast("신청 상태를 새로 확인했습니다.");
     } catch (error) {
-      if (manual) toast("신청 상태를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.");
+      if (manual && !silent) toast("신청 상태를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.");
     }
   }
 
@@ -493,12 +501,12 @@
     hydrateVisibleCovers(pageItems);
   }
 
-  function renderBookCard(book) {
+  function renderBookCard(book, index) {
     const pending = state.pendingIds.has(book.bookId);
     const canApply = canApplyBook(book);
     const status = pending ? "신청 진행중" : book.status || "신청가능";
     return `<article class="book-card">
-      ${cover(book)}
+      ${cover(book, index < COVER_PRIORITY_BATCH_SIZE)}
       <div>
         <span class="status${canApply ? "" : " closed"}">${html(status)}</span>
         <h3 class="book-title">${html(book.title)}</h3>
@@ -572,12 +580,13 @@
     els.detailMeta.textContent = `${book.registrationNo} · ${book.callNo || "청구기호 없음"} · ${book.publicationYear || "연도 미상"}`;
     els.detailCatalog.href = book.detailUrl || "#";
     if (els.detailPage) els.detailPage.href = `detail.html?id=${encodeURIComponent(book.bookId)}`;
-    els.detailCover.innerHTML = cover(book);
+    els.detailCover.innerHTML = cover(book, true);
+    updateActiveBookActions();
     els.detailDescription.textContent = "도서 소개를 불러오는 중입니다.";
     openLayer(els.bookModal);
     const meta = await metaFromAladin(book);
     if (state.activeBook !== book) return;
-    if (meta && meta.cover) els.detailCover.innerHTML = `<img src="${attr(meta.cover)}" alt="${attr(book.title)} 표지" />`;
+    if (meta && meta.cover) els.detailCover.innerHTML = `<img src="${attr(meta.cover)}" ${coverImageAttrs(book.title, true)} />`;
     els.detailDescription.textContent = meta && meta.description ? meta.description : "도서 소개 정보가 준비되지 않았습니다.";
   }
 
@@ -599,10 +608,11 @@
     els.pageCallNo.textContent = book.callNo || "청구기호 없음";
     els.pageLocation.textContent = book.location || "동아대학교 도서관";
     els.pageCatalogLink.href = book.detailUrl || "#";
-    els.pageDetailCover.innerHTML = cover(book);
+    els.pageDetailCover.innerHTML = cover(book, true);
+    updateActiveBookActions();
     els.pageDetailDescription.textContent = "책 소개를 불러오는 중입니다.";
     const meta = await metaFromAladin(book);
-    if (meta && meta.cover) els.pageDetailCover.innerHTML = `<img src="${attr(meta.cover)}" alt="${attr(book.title)} 표지" />`;
+    if (meta && meta.cover) els.pageDetailCover.innerHTML = `<img src="${attr(meta.cover)}" ${coverImageAttrs(book.title, true)} />`;
     els.pageDetailDescription.textContent = meta && meta.description ? meta.description : "책 소개 정보가 준비되지 않았습니다.";
   }
 
@@ -677,7 +687,7 @@
     if (!selected.length) return toast("신청 가능한 도서를 먼저 선택해주세요.");
     state.selectedBooks = selected;
     els.applyForm.dataset.source = source;
-    els.applySummary.textContent = selected.length === 1 ? `"${selected[0].title}" 1권을 신청합니다.` : `${selected.length}권을 한 번에 신청합니다.`;
+    updateApplySummary();
     openLayer(els.applyModal);
   }
 
@@ -717,7 +727,11 @@
       toast("신청이 접수되었습니다.");
       await refreshPending(false);
     } catch (error) {
-      toast(appErrorMessage(error.message || "신청 접수 중 오류가 발생했습니다."));
+      const message = appErrorMessage(error.message || "신청 접수 중 오류가 발생했습니다.");
+      toast(message);
+      if (isAvailabilityConflictMessage(message)) {
+        await syncAvailabilityAfterConflict();
+      }
     } finally {
       hideLoading();
       delete button.dataset.loading;
@@ -910,12 +924,58 @@
     return text || "처리 중 오류가 발생했습니다.";
   }
 
-  function cover(book) {
+  function updateApplySummary() {
+    const selected = state.selectedBooks || [];
+    if (!els.applySummary || !selected.length) return;
+    els.applySummary.textContent = selected.length === 1 ? `"${selected[0].title}" 1권을 신청합니다.` : `${selected.length}권을 한 번에 신청합니다.`;
+  }
+
+  async function syncAvailabilityAfterConflict() {
+    await refreshPending(false, { force: true, silent: true });
+    const selected = state.selectedBooks.filter(canApplyBook);
+    if (selected.length !== state.selectedBooks.length) {
+      state.selectedBooks = selected;
+      if (!selected.length) closeApply();
+      else updateApplySummary();
+    }
+    updateActiveBookActions();
+  }
+
+  function isAvailabilityConflictMessage(message) {
+    return /이미 신청 진행중|이미 마감|마감된 도서|신청 가능한 도서/.test(String(message || ""));
+  }
+
+  function updateActiveBookActions() {
+    if (!state.activeBook) return;
+    updateDetailActionButtons(state.activeBook, els.detailApply, els.detailCart);
+    updateDetailActionButtons(state.activeBook, els.pageDetailApply, els.pageDetailCart);
+  }
+
+  function updateDetailActionButtons(book, applyButton, cartButton) {
+    const canApply = canApplyBook(book);
+    const pending = state.pendingIds.has(book.bookId);
+    const applyLabel = pending ? "신청 진행중" : available(book) ? "바로 신청" : "신청 마감";
+    const cartLabel = pending ? "신청 진행중" : available(book) ? "장바구니 담기" : "신청 마감";
+    if (applyButton) {
+      applyButton.disabled = !canApply;
+      applyButton.textContent = applyLabel;
+    }
+    if (cartButton) {
+      cartButton.disabled = !canApply;
+      cartButton.textContent = cartLabel;
+    }
+  }
+
+  function cover(book, priority) {
     const meta = state.coverCache[book.bookId] || {};
     if (book.cover || meta.cover) {
-      return `<div class="cover image-cover" data-cover-book="${attr(book.bookId)}"><img src="${attr(book.cover || meta.cover)}" alt="${attr(book.title)} 표지" loading="lazy" /></div>`;
+      return `<div class="cover image-cover" data-cover-book="${attr(book.bookId)}"><img src="${attr(book.cover || meta.cover)}" ${coverImageAttrs(book.title, priority)} /></div>`;
     }
     return `<div class="cover" data-cover-book="${attr(book.bookId)}"><strong>${html(book.title)}</strong><span>${html(book.category)}</span></div>`;
+  }
+
+  function coverImageAttrs(title, priority) {
+    return `alt="${attr(title || "도서")} 표지" loading="${priority ? "eager" : "lazy"}" decoding="async"${priority ? ' fetchpriority="high"' : ""}`;
   }
 
   function updateSummaryCounts() {
@@ -927,7 +987,6 @@
     if (!config.appsScriptUrl) return;
     const missing = books
       .filter((book) => book && !book.cover && !(state.coverCache[book.bookId] && state.coverCache[book.bookId].cover))
-      .slice(0, 25)
       .map((book) => ({
         bookId: book.bookId,
         title: book.title,
@@ -936,14 +995,27 @@
       }));
     if (!missing.length) return;
 
+    const hydrationId = ++state.coverHydrationId;
+    const priority = missing.slice(0, COVER_PRIORITY_BATCH_SIZE);
+    const background = missing.slice(COVER_PRIORITY_BATCH_SIZE);
+    await hydrateCoverBatch(priority, hydrationId, true);
+    for (let index = 0; index < background.length; index += COVER_BACKGROUND_BATCH_SIZE) {
+      if (state.coverHydrationId !== hydrationId) return;
+      await waitForCoverIdle();
+      await hydrateCoverBatch(background.slice(index, index + COVER_BACKGROUND_BATCH_SIZE), hydrationId, false);
+    }
+  }
+
+  async function hydrateCoverBatch(items, hydrationId, priority) {
+    if (!items.length || state.coverHydrationId !== hydrationId) return;
     try {
-      const payload = await postToSheet({ action: "bookMetaBatch", items: missing });
+      const payload = await postToSheet({ action: "bookMetaBatch", items });
       if (payload.ok && payload.items) {
         Object.keys(payload.items).forEach((bookId) => {
           const meta = payload.items[bookId];
           if (!meta || (!meta.cover && !meta.description)) return;
           state.coverCache[bookId] = meta;
-          updateCoverElement(bookId, meta);
+          updateCoverElement(bookId, meta, priority);
         });
         saveJson("careerBookCoverCache", state.coverCache);
         return;
@@ -952,21 +1024,37 @@
       // Older Apps Script deployments do not know bookMetaBatch yet.
     }
 
-    const fallback = missing.slice(0, 8);
+    const fallback = items.slice(0, COVER_BACKGROUND_BATCH_SIZE);
     for (let index = 0; index < fallback.length; index += 1) {
+      if (state.coverHydrationId !== hydrationId) return;
       const book = findBook(fallback[index].bookId);
       if (!book) continue;
       const meta = await metaFromAladin(book);
-      if (meta && meta.cover) updateCoverElement(book.bookId, meta);
+      if (meta && meta.cover) updateCoverElement(book.bookId, meta, priority);
     }
   }
 
-  function updateCoverElement(bookId, meta) {
+  function waitForCoverIdle() {
+    return new Promise((resolve) => {
+      if (window.requestIdleCallback) {
+        window.requestIdleCallback(resolve, { timeout: COVER_BACKGROUND_DELAY_MS * 4 });
+        return;
+      }
+      window.setTimeout(resolve, COVER_BACKGROUND_DELAY_MS);
+    });
+  }
+
+  function updateCoverElement(bookId, meta, priority) {
     if (!meta || !meta.cover) return;
     document.querySelectorAll(`[data-cover-book="${cssEscape(bookId)}"]`).forEach((element) => {
       element.classList.add("image-cover");
-      element.innerHTML = `<img src="${attr(meta.cover)}" alt="도서 표지" loading="lazy" />`;
+      element.innerHTML = `<img src="${attr(meta.cover)}" ${coverImageAttrs(element.textContent || "도서", priority || isNearViewport(element))} />`;
     });
+  }
+
+  function isNearViewport(element) {
+    const rect = element.getBoundingClientRect();
+    return rect.top < window.innerHeight * 1.25 && rect.bottom > -window.innerHeight * 0.25;
   }
 
   function hasCart() {
