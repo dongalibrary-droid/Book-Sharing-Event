@@ -4,6 +4,8 @@
   const COVER_PRIORITY_BATCH_SIZE = 6;
   const COVER_BACKGROUND_BATCH_SIZE = 8;
   const COVER_BACKGROUND_DELAY_MS = 180;
+  const PENDING_CACHE_KEY = "careerBookPendingIds";
+  const PENDING_CACHE_MAX_AGE_MS = 120000;
   const settingsStartedAt = Date.now();
   const siteDefaults = {
     SITE_TITLE: "도서 나눔 플랫폼",
@@ -25,7 +27,7 @@
   const state = {
     books: [],
     filtered: [],
-    pendingIds: new Set(),
+    pendingIds: loadPendingIdCache(),
     category: "전체",
     view: "list",
     page: 1,
@@ -66,13 +68,13 @@
 
     if (pageName === "catalog") {
       await withLoading("도서 목록을 불러오는 중입니다.", async () => {
-        await loadBooks();
+        const pendingPromise = refreshPending(false, { silent: true, render: false });
+        await Promise.all([loadBooks(), pendingPromise]);
         updateCart();
         bindCatalog();
         renderCategories();
         filterBooks();
       });
-      refreshPending(false);
       return;
     }
 
@@ -437,6 +439,7 @@
   async function refreshPending(manual, options = {}) {
     const forceRefresh = Boolean(manual || options.force);
     const silent = Boolean(options.silent);
+    const shouldRender = options.render !== false;
     if (!config.appsScriptUrl) {
       if (manual && !silent) toast("신청 상태를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.");
       return;
@@ -445,10 +448,13 @@
       const payload = await getFromSheet({ action: "pending", refresh: forceRefresh ? "1" : "" });
       const entries = payload.entries || [];
       state.pendingIds = new Set(entries.map((entry) => entry.bookId).filter(Boolean));
-      updateSummaryCounts();
-      if (pageName === "catalog") filterBooks();
-      if (pageName === "detail") updateActiveBookActions();
-      updateCart();
+      savePendingIdCache(state.pendingIds);
+      if (shouldRender) {
+        updateSummaryCounts();
+        if (pageName === "catalog") filterBooks();
+        if (pageName === "detail") updateActiveBookActions();
+        updateCart();
+      }
       if (manual && !silent) toast("신청 상태를 새로 확인했습니다.");
     } catch (error) {
       if (manual && !silent) toast("신청 상태를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.");
@@ -1139,6 +1145,20 @@
 
   function saveJson(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
+  }
+
+  function loadPendingIdCache() {
+    const cached = loadJson(PENDING_CACHE_KEY, null);
+    if (!cached || !Array.isArray(cached.ids)) return new Set();
+    if (Date.now() - Number(cached.savedAt || 0) > PENDING_CACHE_MAX_AGE_MS) return new Set();
+    return new Set(cached.ids.map(onlyText).filter(Boolean));
+  }
+
+  function savePendingIdCache(pendingIds) {
+    saveJson(PENDING_CACHE_KEY, {
+      savedAt: Date.now(),
+      ids: Array.from(pendingIds || []).filter(Boolean),
+    });
   }
 
   function normalizeUser(user) {
