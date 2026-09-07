@@ -9,6 +9,8 @@ const CONFIG = {
   PENDING_CACHE_SECONDS: 60,
   MAX_BOOKS_PER_REQUEST: 20,
   MAX_META_BATCH_SIZE: 25,
+  TIME_ZONE: "Asia/Seoul",
+  DATETIME_FORMAT: "yyyy-MM-dd HH:mm:ss",
 };
 
 const BOOK_HEADERS = ["도서ID", "등록번호", "서명", "저자", "청구기호", "소장위치", "가격", "출판년도", "도서상세URL", "ISBN13", "카테고리", "상태", "신청가능수량", "신청중수량", "확정수량", "비고", "원본번호"];
@@ -92,7 +94,7 @@ function loginUser_(payload) {
   lock.waitLock(10000);
   try {
     const sheet = getSpreadsheet_().getSheetByName(CONFIG.USER_SHEET_NAME);
-    const now = new Date();
+    const now = nowKst_();
     const lastRow = sheet.getLastRow();
     if (lastRow >= 2) {
       const values = sheet.getRange(2, 1, lastRow - 1, USER_HEADERS.length).getValues();
@@ -129,7 +131,7 @@ function submitApplication_(payload) {
     const requestSheet = ss.getSheetByName(CONFIG.REQUEST_SHEET_NAME);
     const bookMap = getBookMap_();
     const pendingIds = getPendingBookIdSet_();
-    const now = new Date();
+    const now = nowKst_();
     const rows = [];
     const requestIds = [];
 
@@ -170,7 +172,7 @@ function cancelApplication_(payload) {
     const status = cell_(row, indexes, "상태");
     if (status !== "신청접수" && status !== "처리중") throw new Error("현재 상태에서는 취소할 수 없습니다.");
     sheet.getRange(index + 1, indexes["상태"] + 1).setValue("취소");
-    sheet.getRange(index + 1, indexes["처리일시"] + 1).setValue(new Date());
+    sheet.getRange(index + 1, indexes["처리일시"] + 1).setValue(nowKst_());
     CacheService.getScriptCache().remove("careerBookPending");
     return { ok: true };
   }
@@ -496,6 +498,10 @@ function requireText_(value, label) {
 
 function normalizePhone_(value) {
   return String(value || "").replace(/[^0-9]/g, "");
+}
+
+function nowKst_() {
+  return Utilities.formatDate(new Date(), CONFIG.TIME_ZONE, CONFIG.DATETIME_FORMAT);
 }
 
 function normalizeTerminology_(value) {
