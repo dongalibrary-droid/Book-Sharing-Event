@@ -388,7 +388,7 @@
       phone: onlyText(form.get("phone")),
     };
     if (!user.studentId || !user.studentName || !user.phone) {
-      toast("학번/교번, 성명, 휴대폰번호를 모두 입력해주세요.");
+      toast("학번/직번, 성명, 휴대폰번호를 모두 입력해주세요.");
       return;
     }
     const button = els.loginForm.querySelector("button[type='submit']");
@@ -746,7 +746,7 @@
       state.myRequests = [];
       state.selectedRequestIds = new Set();
       els.myRequestCount.textContent = "0";
-      els.myRequests.innerHTML = `<div class="empty-state"><strong>로그인이 필요합니다.</strong><p>학생/교원 로그인 후 신청 진행상황을 확인할 수 있습니다.</p><a class="primary" href="index.html">로그인하기</a></div>`;
+      els.myRequests.innerHTML = `<div class="empty-state"><strong>로그인이 필요합니다.</strong><p>학생/교직원 로그인 후 신청 진행상황을 확인할 수 있습니다.</p><a class="primary" href="index.html">로그인하기</a></div>`;
       updateBulkActions();
       return;
     }

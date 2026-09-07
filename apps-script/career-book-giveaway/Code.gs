@@ -17,7 +17,7 @@ const USER_HEADERS = ["학번", "성명", "휴대폰번호", "개인정보동의
 const DEFAULT_SETTINGS = [
   ["SITE_TITLE", "동아대학교 도서관 도서 나눔", "사이트와 로그인 화면에 표시되는 기본 행사명"],
   ["SITE_EYEBROW", "Library Book Sharing", "로그인 화면 상단 보조 문구"],
-  ["SITE_DESCRIPTION", "학번/교번, 성명, 휴대폰번호로 로그인하면 도서 신청과 진행상황 확인을 한 곳에서 관리할 수 있습니다.", "로그인 화면 안내 문구"],
+  ["SITE_DESCRIPTION", "학번/직번, 성명, 휴대폰번호로 로그인하면 도서 신청과 진행상황 확인을 한 곳에서 관리할 수 있습니다.", "로그인 화면 안내 문구"],
   ["FOOTER_TITLE", "동좌문도", "푸터 소개 제목"],
   ["FOOTER_HEADING", "동아대학교 도서관", "푸터 소개 기관명"],
   ["FOOTER_QUOTE", "“스승과 제자가 한자리에 앉아서 정도(正道)가 무엇인지 묻고 답한다.”", "푸터 소개 인용문"],
@@ -83,7 +83,7 @@ function setSpreadsheetId() {
 }
 
 function loginUser_(payload) {
-  const studentId = requireText_(payload.studentId, "학번/교번");
+  const studentId = requireText_(payload.studentId, "학번/직번");
   const studentName = requireText_(payload.studentName, "성명");
   const phone = normalizePhone_(requireText_(payload.phone, "휴대폰번호"));
   if (!payload.privacyConsent) throw new Error("개인정보 수집 및 이용에 동의해주세요.");
@@ -117,7 +117,7 @@ function submitApplication_(payload) {
   if (books.length > CONFIG.MAX_BOOKS_PER_REQUEST) throw new Error("한 번에 신청할 수 있는 권수를 초과했습니다.");
 
   const studentName = requireText_(payload.studentName, "성명");
-  const studentId = requireText_(payload.studentId, "학번/교번");
+  const studentId = requireText_(payload.studentId, "학번/직번");
   const phone = normalizePhone_(requireText_(payload.phone, "휴대폰번호"));
   const memo = String(payload.memo || "").trim();
   const source = String(payload.source || "site").trim();
@@ -154,7 +154,7 @@ function submitApplication_(payload) {
 
 function cancelApplication_(payload) {
   const requestId = requireText_(payload.requestId, "신청ID");
-  const studentId = requireText_(payload.studentId, "학번/교번");
+  const studentId = requireText_(payload.studentId, "학번/직번");
   const phone = normalizePhone_(requireText_(payload.phone, "휴대폰번호"));
   const studentName = String(payload.studentName || "").trim();
   const sheet = getSpreadsheet_().getSheetByName(CONFIG.REQUEST_SHEET_NAME);
@@ -178,7 +178,7 @@ function cancelApplication_(payload) {
 }
 
 function readMyRequests_(params) {
-  const studentId = requireText_(params.studentId, "학번/교번");
+  const studentId = requireText_(params.studentId, "학번/직번");
   const phone = normalizePhone_(requireText_(params.phone, "휴대폰번호"));
   const studentName = String(params.studentName || "").trim();
   const sheet = getSpreadsheet_().getSheetByName(CONFIG.REQUEST_SHEET_NAME);

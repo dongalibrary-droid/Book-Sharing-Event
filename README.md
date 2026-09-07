@@ -1,14 +1,14 @@
 # 동아대학교 도서관 도서 나눔
 
-학생/교원이 도서 나눔 대상 도서를 온라인 서점처럼 검색하고, 개별 신청 또는 장바구니 신청을 할 수 있는 정적 웹사이트입니다.
+학생/교직원이 도서 나눔 대상 도서를 온라인 서점처럼 검색하고, 개별 신청 또는 장바구니 신청을 할 수 있는 정적 웹사이트입니다.
 
 ## 구성
 
-- `public/index.html`: 학생/교원 로그인 첫 화면
+- `public/index.html`: 학생/교직원 로그인 첫 화면
 - `public/catalog.html`: 도서목록, 카테고리, 검색, 미리보기, 장바구니 신청
 - `public/detail.html`: 개별 도서 상세 소개 페이지
-- `public/status.html`: 로그인한 학생/교원의 신청 진행상황 및 신청 취소
-- `public/guide.html`: 학생/교원용 이용안내
+- `public/status.html`: 로그인한 학생/교직원의 신청 진행상황 및 신청 취소
+- `public/guide.html`: 학생/교직원용 이용안내
 - `public/assets/data/career-books.json`: 웹사이트 도서 데이터
 - `apps-script/career-book-giveaway/Code.gs`: 구글시트와 알라딘 API를 연결하는 Apps Script
 - `outputs/career-book-giveaway/dong-a-career-book-giveaway-google-sheets-template.xlsx`: 구글시트 업로드용 템플릿
