@@ -133,6 +133,12 @@
             <button class="close" type="button" data-apply-close aria-label="닫기"><i class="fa-solid fa-xmark"></i></button>
             <h2 id="applyTitle">도서 신청</h2>
             <p id="applySummary" class="muted"></p>
+            <fieldset class="pickup-campus" aria-describedby="pickupCampusHelp">
+              <legend>수령 캠퍼스 (필수)</legend>
+              <p id="pickupCampusHelp">반드시 수령 캠퍼스를 선택해주세요.</p>
+              <label><input type="radio" name="pickupCampus" value="한림도서관(승학)" required /> 한림도서관(승학)</label>
+              <label><input type="radio" name="pickupCampus" value="부민도서관(부민)" required /> 부민도서관(부민)</label>
+            </fieldset>
             <label class="memo-only">메모<textarea name="memo" rows="3" placeholder="담당자에게 남길 말이 있으면 입력하세요."></textarea></label>
             <div class="actions">
               <button type="button" class="ghost" data-apply-close>취소</button>
@@ -699,6 +705,7 @@
     const selected = (books || []).filter(Boolean).filter((book) => available(book) && !state.pendingIds.has(book.bookId));
     if (!selected.length) return toast("신청 가능한 도서를 먼저 선택해주세요.");
     state.selectedBooks = selected;
+    els.applyForm.querySelectorAll('[name="pickupCampus"]').forEach((input) => { input.checked = false; });
     els.applyForm.dataset.source = source;
     updateApplySummary();
     openLayer(els.applyModal);
@@ -709,6 +716,11 @@
     if (!state.user) return toast("로그인 후 신청할 수 있습니다.");
     if (!config.appsScriptUrl) return toast("신청을 접수하지 못했습니다. 잠시 후 다시 시도해주세요.");
     const form = new FormData(els.applyForm);
+    const pickupCampus = form.get("pickupCampus");
+    if (!["한림도서관(승학)", "부민도서관(부민)"].includes(pickupCampus)) {
+      els.applyForm.querySelector('[name="pickupCampus"]').focus();
+      return toast("반드시 수령 캠퍼스를 선택해주세요.");
+    }
     const payload = {
       action: "submitApplication",
       source: els.applyForm.dataset.source || "site",
@@ -716,6 +728,7 @@
       studentId: state.user.studentId,
       phone: state.user.phone,
       memo: form.get("memo"),
+      pickupCampus,
       books: state.selectedBooks.map((book) => ({
         bookId: book.bookId,
         registrationNo: book.registrationNo,
@@ -807,6 +820,7 @@
           <span class="status ${statusClass(entry.status)}">${html(entry.status)}</span>
           <h3>${html(entry.title || entry.bookId)}</h3>
           <p>${html(entry.registrationNo || "")} · ${html(entry.author || "저자 정보 없음")}</p>
+          <p>수령 캠퍼스: ${html(entry.pickupCampus || "미지정")}</p>
           <small>${html(entry.requestedAt || "")}</small>
         </div>
         <button type="button" class="ghost danger request-cancel" data-cancel-request="${attr(entry.requestId)}" ${cancellable ? "" : "disabled"}>신청 취소</button>

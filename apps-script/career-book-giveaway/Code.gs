@@ -14,7 +14,8 @@ const CONFIG = {
 };
 
 const BOOK_HEADERS = ["도서ID", "등록번호", "서명", "저자", "청구기호", "소장위치", "가격", "출판년도", "도서상세URL", "ISBN13", "카테고리", "상태", "신청가능수량", "신청중수량", "확정수량", "비고", "원본번호"];
-const REQUEST_HEADERS = ["신청ID", "신청일시", "상태", "학생명", "학번", "학과", "연락처", "이메일", "신청경로", "도서ID", "등록번호", "서명", "저자", "ISBN13", "메모", "처리자", "처리일시"];
+const REQUEST_HEADERS = ["신청ID", "신청일시", "상태", "학생명", "학번", "학과", "연락처", "이메일", "신청경로", "도서ID", "등록번호", "서명", "저자", "ISBN13", "메모", "처리자", "처리일시", "수령캠퍼스"];
+const PICKUP_CAMPUSES = ["한림도서관(승학)", "부민도서관(부민)"];
 const USER_HEADERS = ["학번", "성명", "휴대폰번호", "개인정보동의", "최초로그인", "최근로그인", "로그인횟수"];
 const DEFAULT_SETTINGS = [
   ["SITE_TITLE", "동아대학교 도서관 도서 나눔", "사이트와 로그인 화면에 표시되는 기본 행사명"],
@@ -122,6 +123,8 @@ function submitApplication_(payload) {
   const studentId = requireText_(payload.studentId, "학번/직번");
   const phone = normalizePhone_(requireText_(payload.phone, "휴대폰번호"));
   const memo = String(payload.memo || "").trim();
+  const pickupCampus = String(payload.pickupCampus || "").trim();
+  if (PICKUP_CAMPUSES.indexOf(pickupCampus) === -1) throw new Error("반드시 수령 캠퍼스를 선택해주세요.");
   const source = String(payload.source || "site").trim();
 
   const lock = LockService.getScriptLock();
@@ -143,7 +146,7 @@ function submitApplication_(payload) {
       if (pendingIds[bookId]) throw new Error("이미 신청 진행중인 도서입니다: " + book.title);
       const requestId = Utilities.getUuid();
       requestIds.push(requestId);
-      rows.push([requestId, now, "신청접수", studentName, studentId, "", phone, "", source, bookId, book.registrationNo, book.title, book.author, book.isbn13 || item.isbn13 || "", memo, "", ""]);
+      rows.push([requestId, now, "신청접수", studentName, studentId, "", phone, "", source, bookId, book.registrationNo, book.title, book.author, book.isbn13 || item.isbn13 || "", memo, "", "", pickupCampus]);
     });
 
     requestSheet.getRange(requestSheet.getLastRow() + 1, 1, rows.length, REQUEST_HEADERS.length).setValues(rows);
@@ -201,6 +204,7 @@ function readMyRequests_(params) {
       title: cell_(row, indexes, "서명"),
       author: cell_(row, indexes, "저자"),
       memo: cell_(row, indexes, "메모"),
+      pickupCampus: cell_(row, indexes, "수령캠퍼스"),
     });
   }
   return entries;
@@ -414,10 +418,30 @@ function rowToBook_(row, indexes) {
 function ensureSheets_() {
   const ss = getSpreadsheet_();
   ensureSheet_(ss, CONFIG.BOOK_SHEET_NAME, BOOK_HEADERS);
-  ensureSheet_(ss, CONFIG.REQUEST_SHEET_NAME, REQUEST_HEADERS);
+  const requestSheet = ensureSheet_(ss, CONFIG.REQUEST_SHEET_NAME, REQUEST_HEADERS);
+  ensurePickupCampusColumn_(requestSheet);
   ensureSheet_(ss, CONFIG.USER_SHEET_NAME, USER_HEADERS);
   const settingsSheet = ensureSheet_(ss, CONFIG.SETTINGS_SHEET_NAME, ["설정항목", "값", "비고"]);
   ensureDefaultSettings_(settingsSheet);
+}
+
+function ensurePickupCampusColumn_(sheet) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const column = REQUEST_HEADERS.length;
+    if (sheet.getMaxColumns() < column) {
+      sheet.insertColumnsAfter(sheet.getMaxColumns(), column - sheet.getMaxColumns());
+    }
+    const header = sheet.getRange(1, column).getDisplayValue().trim();
+    if (header === "수령캠퍼스") return;
+    if (header || !sheet.getRange(1, column, sheet.getMaxRows(), 1).isBlank()) {
+      throw new Error("신청현황 R열에 기존 데이터가 있습니다. 수령캠퍼스 열 위치를 확인해주세요.");
+    }
+    sheet.getRange(1, column).setValue("수령캠퍼스");
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function ensureSheet_(ss, name, headers) {

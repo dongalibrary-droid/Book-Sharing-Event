@@ -148,7 +148,7 @@ def write_template(books: list[dict]) -> Path:
     ws_settings = wb.create_sheet("설정")
 
     book_headers = ["도서ID", "등록번호", "서명", "저자", "청구기호", "소장위치", "가격", "출판년도", "도서상세URL", "ISBN13", "카테고리", "상태", "신청가능수량", "신청중수량", "확정수량", "비고", "원본번호"]
-    request_headers = ["신청ID", "신청일시", "상태", "학생명", "학번", "학과", "연락처", "이메일", "신청경로", "도서ID", "등록번호", "서명", "저자", "ISBN13", "메모", "처리자", "처리일시"]
+    request_headers = ["신청ID", "신청일시", "상태", "학생명", "학번", "학과", "연락처", "이메일", "신청경로", "도서ID", "등록번호", "서명", "저자", "ISBN13", "메모", "처리자", "처리일시", "수령캠퍼스"]
     user_headers = ["학번", "성명", "휴대폰번호", "개인정보동의", "최초로그인", "최근로그인", "로그인횟수"]
 
     ws_books.append(book_headers)
@@ -179,7 +179,7 @@ def write_template(books: list[dict]) -> Path:
     header_style(ws_users, 1, len(user_headers), "17A765")
     header_style(ws_settings, 1, 3, "263238")
     widths(ws_books, [14, 14, 44, 22, 18, 18, 12, 10, 44, 16, 15, 12, 12, 12, 12, 24, 10])
-    widths(ws_requests, [24, 20, 12, 14, 14, 18, 16, 24, 14, 14, 14, 44, 22, 16, 28, 14, 20])
+    widths(ws_requests, [24, 20, 12, 14, 14, 18, 16, 24, 14, 14, 14, 44, 22, 16, 28, 14, 20, 24])
     widths(ws_users, [16, 14, 18, 14, 20, 20, 12])
     widths(ws_settings, [22, 36, 58])
     row_style(ws_books, ws_books.max_row, len(book_headers))
@@ -188,12 +188,14 @@ def write_template(books: list[dict]) -> Path:
     row_style(ws_settings, ws_settings.max_row, 3)
 
     ws_books.auto_filter.ref = f"A1:Q{ws_books.max_row}"
-    ws_requests.auto_filter.ref = "A1:Q5000"
+    ws_requests.auto_filter.ref = "A1:R5000"
     ws_users.auto_filter.ref = "A1:G3000"
     ws_requests.add_data_validation(DataValidation(type="list", formula1='"신청접수,처리중,확정,취소,중복,마감"', allow_blank=False))
     ws_requests.data_validations.dataValidation[-1].add("C2:C5000")
+    ws_requests.add_data_validation(DataValidation(type="list", formula1='"한림도서관(승학),부민도서관(부민)"', allow_blank=True))
+    ws_requests.data_validations.dataValidation[-1].add("R2:R5000")
     ws_books.conditional_formatting.add(f"A2:Q{ws_books.max_row}", FormulaRule(formula=['$L2="마감"'], fill=PatternFill("solid", fgColor="FDE2E2")))
-    ws_requests.conditional_formatting.add("A2:Q5000", FormulaRule(formula=['$C2="신청접수"'], fill=PatternFill("solid", fgColor="FFF4CC")))
+    ws_requests.conditional_formatting.add("A2:R5000", FormulaRule(formula=['$C2="신청접수"'], fill=PatternFill("solid", fgColor="FFF4CC")))
 
     for row in range(2, ws_books.max_row + 1):
         ws_books.cell(row, 7).number_format = '#,##0'

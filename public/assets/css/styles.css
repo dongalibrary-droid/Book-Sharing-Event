@@ -175,6 +175,11 @@ body.logged-in .floating-cart { display: inline-flex; align-items: center; justi
 .text-link { min-height: 42px; display: inline-flex; align-items: center; color: var(--blue); font-weight: 800; }
 .apply-form { width: min(760px,calc(100vw - 36px)); padding: 34px; }
 .apply-form h2 { margin: 0 0 8px; }
+.pickup-campus { display: grid; gap: 12px; min-width: 0; margin: 20px 0; padding: 16px; border: 1px solid var(--line); border-radius: 6px; }
+.pickup-campus legend { padding: 0 6px; font-weight: 800; }
+.pickup-campus p { margin: 0; color: #b42318; font-weight: 700; }
+.pickup-campus label { display: flex; align-items: center; gap: 8px; min-height: 36px; cursor: pointer; }
+.pickup-campus input { width: 18px; height: 18px; accent-color: var(--blue); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; }
 .form-grid label, .consent { display: grid; gap: 7px; color: #2d3748; font-weight: 800; }
 .form-grid .full { grid-column: 1 / -1; }
