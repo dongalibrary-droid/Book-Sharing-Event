@@ -10,13 +10,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/styles.css?v=20260911-1" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=20260911-2" />
 </head>
 <body data-page="catalog">
   <script>
     window.CAREER_BOOKS_CONFIG = {
       appsScriptUrl: "https://script.google.com/macros/s/AKfycbxQrpdAeaKGvu-27715evDBXFt12FP6ooytHYzLt1wN_pWMdPyy47GGPgZQwESDbD7X/exec",
-      dataUrl: "assets/data/career-books.json?v=20260911-1"
+      dataUrl: "assets/data/career-books.json?v=20260911-2"
     };
   </script>
   <header class="site-header">
@@ -109,11 +109,17 @@
       <button class="close" type="button" data-apply-close aria-label="닫기"><i class="fa-solid fa-xmark"></i></button>
       <h2 id="applyTitle">도서 신청</h2>
       <p id="applySummary" class="muted"></p>
+      <fieldset class="pickup-campus" aria-describedby="pickupCampusHelp">
+        <legend>수령 캠퍼스 (필수)</legend>
+        <p id="pickupCampusHelp">반드시 수령 캠퍼스를 선택해주세요.</p>
+        <label><input type="radio" name="pickupCampus" value="한림도서관(승학)" required /> 한림도서관(승학)</label>
+        <label><input type="radio" name="pickupCampus" value="부민도서관(부민)" required /> 부민도서관(부민)</label>
+      </fieldset>
       <label class="memo-only">메모<textarea name="memo" rows="3" placeholder="담당자에게 남길 말이 있으면 입력하세요."></textarea></label>
       <div class="actions"><button type="button" class="ghost" data-apply-close>취소</button><button type="submit" class="primary">신청 제출</button></div>
     </form>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="assets/js/app.js?v=20260911-1"></script>
+  <script src="assets/js/app.js?v=20260911-2"></script>
 </body>
 </html>
