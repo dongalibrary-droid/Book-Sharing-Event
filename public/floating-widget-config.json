@@ -1,5 +1,6 @@
 {
   "enabled": true,
+  "mode": "direct",
   "position": {
     "left": "24px",
     "bottom": "48px",
@@ -7,7 +8,8 @@
     "mobileBottom": "calc(16px + env(safe-area-inset-bottom))"
   },
   "trigger": {
-    "label": "도서관 서비스",
+    "label": "도서 무료나눔",
+    "badge": "바로가기",
     "image": "https://dongalibrary-droid.github.io/Book-Sharing-Event/assets/images/book-sharing-floating.png?v=177fa37"
   },
   "items": [
@@ -17,13 +19,6 @@
       "url": "https://dongalibrary-droid.github.io/Book-Sharing-Event/",
       "image": "https://dongalibrary-droid.github.io/Book-Sharing-Event/assets/images/book-sharing-floating.png?v=177fa37",
       "ariaLabel": "도서 무료나눔 바로가기"
-    },
-    {
-      "kind": "ai",
-      "label": "AI 추천도서",
-      "url": "https://dongalib1946.github.io/donga-ai-book-finder/",
-      "image": "https://dongalib1946.github.io/donga-ai-book-finder/img/ai.png",
-      "ariaLabel": "AI 추천도서 바로가기"
     }
   ]
 }
