@@ -34,10 +34,14 @@ function doGet(e) {
     if (action === "health") return json_({ ok: true, service: "Dong-A University Library Book Sharing" });
     if (action === "bookMeta") return json_({ ok: true, item: getBookMeta_(params) });
     if (action === "bookMetaBatch") return json_({ ok: true, items: getBookMetaBatch_(params) });
-    ensureSheets_();
+    // Public reads must not acquire the sheet migration lock on every page load.
+    if (action === "catalog") return json_(readCatalog_(params));
+    if (action === "catalogSummary") return json_(readCatalogSummary_(params));
+    if (action === "booksByIds") return json_({ ok: true, books: readBooksByIds_(params) });
     if (action === "settings") return json_({ ok: true, settings: readPublicSettings_() });
-    if (action === "books") return json_({ ok: true, books: readBooks_() });
     if (action === "pending") return json_({ ok: true, entries: readPendingRequests_(params.refresh === "1") });
+    ensureSheets_();
+    if (action === "books") return json_({ ok: true, books: readBooks_() });
     if (action === "myRequests") return json_({ ok: true, entries: readMyRequests_(params) });
     return json_({ ok: false, message: "지원하지 않는 요청입니다." });
   } catch (error) {
@@ -142,7 +146,7 @@ function submitApplication_(payload) {
       const bookId = requireText_(item.bookId, "도서ID");
       const book = bookMap[bookId];
       if (!book) throw new Error("도서목록에서 찾을 수 없는 도서입니다: " + bookId);
-      if (book.status === "마감" || Number(book.availableQuantity || 1) <= 0) throw new Error("이미 마감된 도서입니다: " + book.title);
+      if (book.status === "마감" || (book.availableQuantity !== undefined && Number(book.availableQuantity) <= 0)) throw new Error("이미 마감된 도서입니다: " + book.title);
       if (pendingIds[bookId]) throw new Error("이미 신청 진행중인 도서입니다: " + book.title);
       const requestId = Utilities.getUuid();
       requestIds.push(requestId);
@@ -151,6 +155,7 @@ function submitApplication_(payload) {
 
     requestSheet.getRange(requestSheet.getLastRow() + 1, 1, rows.length, REQUEST_HEADERS.length).setValues(rows);
     CacheService.getScriptCache().remove("careerBookPending");
+    CacheService.getScriptCache().remove("catalogSummary");
     return { ok: true, requestIds: requestIds, count: rows.length };
   } finally {
     lock.releaseLock();
@@ -177,6 +182,7 @@ function cancelApplication_(payload) {
     sheet.getRange(index + 1, indexes["상태"] + 1).setValue("취소");
     sheet.getRange(index + 1, indexes["처리일시"] + 1).setValue(nowKst_());
     CacheService.getScriptCache().remove("careerBookPending");
+    CacheService.getScriptCache().remove("catalogSummary");
     return { ok: true };
   }
   throw new Error("신청내역을 찾을 수 없습니다.");
@@ -227,6 +233,67 @@ function readBooks_() {
   return values.slice(1).map(function (row) { return rowToBook_(row, indexes); }).filter(function (book) { return book.bookId && book.title; });
 }
 
+function catalogSnapshot_(params) {
+  const pending = {};
+  readPendingRequests_(params.refresh === "1").forEach(function (entry) { pending[entry.bookId] = true; });
+  return readBooks_().map(function (book) {
+    book.pending = Boolean(pending[book.bookId]);
+    return book;
+  });
+}
+
+function catalogAvailable_(book) {
+  return book.status !== "마감" && book.availableQuantity > 0 && !book.pending;
+}
+
+function catalogSummary_(books) {
+  const categories = {};
+  let available = 0;
+  books.forEach(function (book) {
+    categories[book.category] = (categories[book.category] || 0) + 1;
+    if (catalogAvailable_(book)) available += 1;
+  });
+  return { total: books.length, available: available, categories: categories };
+}
+
+function readCatalogSummary_(params) {
+  const cache = CacheService.getScriptCache();
+  const cached = params.refresh === "1" ? null : cache.get("catalogSummary");
+  if (cached) return JSON.parse(cached);
+  const result = { ok: true, summary: catalogSummary_(catalogSnapshot_(params)) };
+  cache.put("catalogSummary", JSON.stringify(result), 30);
+  return result;
+}
+
+function readCatalog_(params) {
+  const books = catalogSnapshot_(params);
+  const query = String(params.query || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const category = String(params.category || "전체");
+  const filtered = books.filter(function (book) {
+    if (category !== "전체" && book.category !== category) return false;
+    if (params.availableOnly === "1" && !catalogAvailable_(book)) return false;
+    if (params.hidePending === "1" && book.pending) return false;
+    const text = [book.title, book.author, book.registrationNo, book.callNo, book.category].join(" ").toLowerCase().replace(/\s+/g, " ").trim();
+    return !query || text.indexOf(query) !== -1;
+  });
+  filtered.sort(function (a, b) {
+    if (params.sort === "title") return a.title.localeCompare(b.title, "ko");
+    if (params.sort === "year") return Number(b.publicationYear || 0) - Number(a.publicationYear || 0);
+    if (params.sort === "price") return b.price - a.price;
+    return Number(a.sourceNo || 0) - Number(b.sourceNo || 0);
+  });
+  const pageSize = Math.min(50, Math.max(1, Math.floor(Number(params.pageSize) || 25)));
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const page = Math.min(pages, Math.max(1, Math.floor(Number(params.page) || 1)));
+  return { ok: true, summary: catalogSummary_(books), total: filtered.length, page: page, pageSize: pageSize,
+    books: filtered.slice((page - 1) * pageSize, page * pageSize) };
+}
+
+function readBooksByIds_(params) {
+  const ids = parseMetaItems_(params.ids).slice(0, CONFIG.MAX_BOOKS_PER_REQUEST + 1).map(String);
+  return catalogSnapshot_(params).filter(function (book) { return ids.indexOf(book.bookId) !== -1; });
+}
+
 function readPublicSettings_() {
   const sheet = getSpreadsheet_().getSheetByName(CONFIG.SETTINGS_SHEET_NAME);
   const settings = {};
@@ -273,7 +340,8 @@ function readPendingRequests_(forceRefresh) {
       author: cell_(row, indexes, "저자"),
     });
   }
-  cache.put("careerBookPending", JSON.stringify(entries), CONFIG.PENDING_CACHE_SECONDS);
+  // CacheService has a per-value size limit; a busy event must still return results.
+  try { cache.put("careerBookPending", JSON.stringify(entries), CONFIG.PENDING_CACHE_SECONDS); } catch (error) {}
   return entries;
 }
 
@@ -295,13 +363,52 @@ function getBookMeta_(params) {
 }
 
 function getBookMetaBatch_(params) {
-  const items = parseMetaItems_(params.items);
+  const items = parseMetaItems_(params.items).slice(0, CONFIG.MAX_META_BATCH_SIZE);
   const result = {};
-  items.slice(0, CONFIG.MAX_META_BATCH_SIZE).forEach(function (item) {
+  const key = getAladinKey_();
+  if (!key) return result;
+  const cache = CacheService.getScriptCache();
+  let queue = [];
+  items.forEach(function (item) {
     const bookId = String(item.bookId || "").trim();
     if (!bookId) return;
-    result[bookId] = getBookMeta_(item);
+    const isbn = String(item.isbn13 || "").replace(/[^0-9Xx]/g, "");
+    const title = String(item.title || "").trim();
+    const author = String(item.author || "").trim();
+    const cacheKey = "aladinMeta:" + (isbn || Utilities.base64EncodeWebSafe(title + "|" + author).slice(0, 80));
+    const cached = cache.get(cacheKey);
+    if (cached) { result[bookId] = JSON.parse(cached); return; }
+    const urls = [];
+    if (isbn) urls.push(CONFIG.ALADIN_API_BASE + "ItemLookUp.aspx?" + toQuery_({ ttbkey: key, itemIdType: "ISBN13", ItemId: isbn, output: "js", Version: CONFIG.ALADIN_VERSION, Cover: "Big" }));
+    buildAladinQueries_(title, author).forEach(function (query) {
+      urls.push(CONFIG.ALADIN_API_BASE + "ItemSearch.aspx?" + toQuery_({ ttbkey: key, Query: query.query, QueryType: query.type,
+        SearchTarget: "Book", MaxResults: 1, start: 1, output: "js", Version: CONFIG.ALADIN_VERSION, Cover: "Big" }));
+    });
+    queue.push({ bookId: bookId, cacheKey: cacheKey, urls: urls, index: 0 });
   });
+  // Resolve one search strategy for all books concurrently, then retry only misses.
+  while (queue.length) {
+    const active = queue.filter(function (job) { return job.index < job.urls.length; });
+    if (!active.length) break;
+    const responses = UrlFetchApp.fetchAll(active.map(function (job) { return { url: job.urls[job.index], muteHttpExceptions: true }; }));
+    const next = [];
+    active.forEach(function (job, index) {
+      try {
+        if (responses[index].getResponseCode() >= 400) return;
+        const data = JSON.parse(responses[index].getContentText());
+        if (data.errorCode) return;
+        const item = data.item && data.item[0];
+        job.index += 1;
+        if (!item && job.index < job.urls.length) { next.push(job); return; }
+        const meta = normalizeAladinItem_(item);
+        result[job.bookId] = meta;
+        cache.put(job.cacheKey, JSON.stringify(meta), CONFIG.META_CACHE_SECONDS);
+      } catch (error) {
+        // A failed lookup must not discard the successful books in this batch.
+      }
+    });
+    queue = next;
+  }
   return result;
 }
 
@@ -392,7 +499,7 @@ function getBookMap_() {
 
 function getPendingBookIdSet_() {
   const set = {};
-  readPendingRequests_().forEach(function (entry) { set[entry.bookId] = true; });
+  readPendingRequests_(true).forEach(function (entry) { set[entry.bookId] = true; });
   return set;
 }
 
@@ -410,7 +517,8 @@ function rowToBook_(row, indexes) {
     isbn13: cell_(row, indexes, "ISBN13"),
     category: cell_(row, indexes, "카테고리") || "기타",
     status: cell_(row, indexes, "상태") || "신청가능",
-    availableQuantity: Number(cell_(row, indexes, "신청가능수량")) || 1,
+    availableQuantity: cell_(row, indexes, "신청가능수량") === "" ? 1 : Number(cell_(row, indexes, "신청가능수량")),
+    sourceNo: cell_(row, indexes, "원본번호"),
     note: cell_(row, indexes, "비고"),
   };
 }

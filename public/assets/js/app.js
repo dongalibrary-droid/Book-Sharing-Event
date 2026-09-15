@@ -26,6 +26,15 @@
   const pageName = document.body.dataset.page || "catalog";
   const state = {
     books: [],
+    remoteCatalog: Boolean(config.appsScriptUrl),
+    catalogSummary: null,
+    catalogTotal: 0,
+    catalogRequestId: 0,
+    catalogEpoch: 0,
+    catalogPages: new Map(),
+    catalogInFlight: new Map(),
+    coverTask: null,
+    coverWorkerRunning: false,
     filtered: [],
     pendingIds: loadPendingIdCache(),
     category: "전체",
@@ -38,7 +47,7 @@
     selectedRequestIds: new Set(),
     coverHydrationId: 0,
     siteSettings: { ...siteDefaults },
-    coverCache: loadJson("careerBookCoverCache", {}),
+    coverCache: loadCoverCache(),
     cart: loadJson("careerBookCart", []),
     user: loadJson("careerBookUser", null),
   };
@@ -67,6 +76,12 @@
     }
 
     if (pageName === "catalog") {
+      if (state.remoteCatalog) {
+        bindCatalog();
+        loadCatalogSummary();
+        await loadCatalogPage();
+        return;
+      }
       await withLoading("도서 목록을 불러오는 중입니다.", async () => {
         const pendingPromise = refreshPending(false, { silent: true, render: false });
         await Promise.all([loadBooks(), pendingPromise]);
@@ -81,13 +96,11 @@
     if (pageName === "detail") {
       bindDetailPage();
       await withLoading("도서 정보를 불러오는 중입니다.", async () => {
-        await loadBooks();
+        await loadBookIds([new URLSearchParams(location.search).get("id"), ...state.cart]);
         updateCart();
         renderDetailPage();
       });
-      refreshPending(false).then(() => {
-        renderDetailPage();
-      });
+      if (!state.remoteCatalog) refreshPending(false).then(() => renderDetailPage());
       return;
     }
 
@@ -442,7 +455,114 @@
     updateSummaryCounts();
   }
 
+  function mergeBooks(books) {
+    const map = new Map(state.books.map((book) => [book.bookId, book]));
+    books.forEach((book) => {
+      const existing = map.get(book.bookId);
+      if (existing) Object.assign(existing, book);
+      else map.set(book.bookId, book);
+    });
+    state.books = Array.from(map.values());
+  }
+
+  async function loadBookIds(ids, refresh = false) {
+    const missing = [...new Set(ids.filter(Boolean))].filter((id) => refresh || !findBook(id));
+    if (!missing.length) return;
+    if (!state.remoteCatalog) { await loadBooks(); return; }
+    // Cart size can exceed the per-application limit; load it in bounded groups.
+    for (let index = 0; index < missing.length; index += 20) {
+      const requested = missing.slice(index, index + 20);
+      const payload = await getFromSheet({ action: "booksByIds", ids: JSON.stringify(requested), refresh: refresh ? "1" : "" });
+      if (!payload.ok || !Array.isArray(payload.books)) throw new Error(payload.message || "도서 정보를 불러오지 못했습니다.");
+      mergeBooks(payload.books);
+      const found = new Set(payload.books.map((book) => book.bookId));
+      const deleted = new Set(requested.filter((id) => !found.has(id)));
+      if (deleted.size) {
+        state.books = state.books.filter((book) => !deleted.has(book.bookId));
+        state.cart = state.cart.filter((id) => !deleted.has(id));
+        saveJson("careerBookCart", state.cart);
+      }
+    }
+  }
+
+  async function loadCatalogSummary() {
+    try {
+      const payload = await getFromSheet({ action: "catalogSummary" });
+      // A page response contains a newer, matching summary.
+      if (!payload.ok || state.catalogSummary) return;
+      state.catalogSummary = payload.summary;
+      updateSummaryCounts();
+      renderCategories();
+    } catch (error) { /* Page loading provides the retry/error UI. */ }
+  }
+
+  function catalogParams(page) {
+    return { action: "catalog", page, pageSize: state.perPage, category: state.category,
+      query: normalize(els.searchInput.value), sort: els.sortSelect.value,
+      availableOnly: els.availableOnly.checked ? "1" : "", hidePending: els.hidePending.checked ? "1" : "" };
+  }
+
+  function fetchCatalogPage(params) {
+    const key = state.catalogEpoch + ":" + JSON.stringify(params);
+    const cached = state.catalogPages.get(key);
+    if (cached && Date.now() - cached.at < 30000) return Promise.resolve(cached.payload);
+    if (state.catalogInFlight.has(key)) return state.catalogInFlight.get(key);
+    const request = getFromSheet(params).then((payload) => {
+      if (!payload.ok || !Array.isArray(payload.books)) throw new Error(payload.message || "도서 목록을 불러오지 못했습니다.");
+      state.catalogPages.set(key, { at: Date.now(), payload });
+      if (state.catalogPages.size > 8) state.catalogPages.delete(state.catalogPages.keys().next().value);
+      return payload;
+    }).finally(() => state.catalogInFlight.delete(key));
+    state.catalogInFlight.set(key, request);
+    return request;
+  }
+
+  async function loadCatalogPage(force = false) {
+    const requestId = ++state.catalogRequestId;
+    state.coverHydrationId += 1;
+    state.coverTask = null;
+    const params = catalogParams(state.page);
+    if (force) { state.catalogEpoch += 1; state.catalogPages.clear(); params.refresh = "1"; }
+    els.bookResults.setAttribute("aria-busy", "true");
+    els.bookResults.innerHTML = loadingBlock("도서 목록을 불러오는 중입니다.");
+    try {
+      const payload = await fetchCatalogPage(params);
+      if (requestId !== state.catalogRequestId) return;
+      state.page = payload.page;
+      state.catalogTotal = payload.total;
+      state.catalogSummary = payload.summary;
+      mergeBooks(payload.books);
+      state.filtered = payload.books;
+      els.resultCount.textContent = fmt(payload.total);
+      updateSummaryCounts();
+      renderCategories();
+      renderBookPage(payload.books, Math.max(1, Math.ceil(payload.total / state.perPage)));
+      updateCart();
+      // Only one adjacent page is prefetched; no full-catalog crawl or metadata prefetch.
+      if (state.page * state.perPage < payload.total) {
+        fetchCatalogPage({ ...params, page: state.page + 1 }).catch(() => {});
+      }
+    } catch (error) {
+      if (requestId !== state.catalogRequestId) return;
+      els.bookResults.innerHTML = `<p class="empty">${html(appErrorMessage(error.message))} <button type="button" id="retryCatalog">다시 불러오기</button></p>`;
+      $("retryCatalog").addEventListener("click", () => loadCatalogPage(true));
+    } finally {
+      if (requestId === state.catalogRequestId) els.bookResults.setAttribute("aria-busy", "false");
+    }
+  }
+
   async function refreshPending(manual, options = {}) {
+    if (state.remoteCatalog) {
+      try {
+        await loadBookIds([...state.cart, ...state.selectedBooks.map((book) => book.bookId), state.activeBook && state.activeBook.bookId], true);
+        if (pageName === "catalog") await loadCatalogPage(true);
+        updateActiveBookActions();
+        updateCart();
+      } catch (error) {
+        toast("신청 상태를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.");
+      }
+      return;
+    }
     const forceRefresh = Boolean(manual || options.force);
     const silent = Boolean(options.silent);
     const shouldRender = options.render !== false;
@@ -454,6 +574,7 @@
       const payload = await getFromSheet({ action: "pending", refresh: forceRefresh ? "1" : "" });
       const entries = payload.entries || [];
       state.pendingIds = buildPendingKeySet(entries);
+      state.books.forEach((book) => { delete book.pending; });
       savePendingIdCache(state.pendingIds);
       if (shouldRender) {
         updateSummaryCounts();
@@ -470,7 +591,8 @@
   function renderCategories() {
     const counts = new Map();
     state.books.forEach((book) => counts.set(book.category, (counts.get(book.category) || 0) + 1));
-    const rows = [["전체", state.books.length], ...Array.from(counts.entries()).sort((a, b) => b[1] - a[1])];
+    const summary = state.remoteCatalog ? state.catalogSummary : null;
+    const rows = [["전체", summary ? summary.total : state.books.length], ...Object.entries(summary ? summary.categories : Object.fromEntries(counts)).sort((a, b) => b[1] - a[1])];
     els.categoryList.innerHTML = rows.map(([label, count]) => (
       `<button type="button" class="category-button${state.category === label ? " active" : ""}" data-category="${attr(label)}">
         <span>${html(label)}</span><span>${fmt(count)}</span>
@@ -487,6 +609,7 @@
   }
 
   function filterBooks() {
+    if (state.remoteCatalog) return loadCatalogPage();
     const query = normalize(els.searchInput.value);
     const sort = els.sortSelect.value;
     state.filtered = state.books.filter((book) => {
@@ -508,9 +631,14 @@
   }
 
   function renderBooks() {
+    if (state.remoteCatalog) return loadCatalogPage();
     const pages = Math.max(1, Math.ceil(state.filtered.length / state.perPage));
     state.page = Math.min(state.page, pages);
     const pageItems = state.filtered.slice((state.page - 1) * state.perPage, state.page * state.perPage);
+    renderBookPage(pageItems, pages);
+  }
+
+  function renderBookPage(pageItems, pages) {
     els.bookResults.className = `book-results ${state.view}-view`;
     els.bookResults.innerHTML = pageItems.map(renderBookCard).join("") || `<p class="empty">조건에 맞는 도서가 없습니다.</p>`;
     els.bookResults.querySelectorAll("[data-preview]").forEach((button) => button.addEventListener("click", () => openPreview(findBook(button.dataset.preview))));
@@ -637,7 +765,8 @@
 
   async function metaFromAladin(book) {
     if (!config.appsScriptUrl) return null;
-    if (state.coverCache[book.bookId]) return state.coverCache[book.bookId];
+    const cached = cachedBookMeta(book.bookId);
+    if (cached) return cached;
     try {
       const payload = await getFromSheet({
         action: "bookMeta",
@@ -648,8 +777,8 @@
       });
       const item = payload.ok ? payload.item : null;
       if (item && (item.cover || item.description)) {
-        state.coverCache[book.bookId] = item;
-        saveJson("careerBookCoverCache", state.coverCache);
+        state.coverCache[book.bookId] = { ...item, cachedAt: Date.now() };
+        saveJson("careerBookCoverCacheV2", state.coverCache);
       }
       return item;
     } catch (error) {
@@ -672,12 +801,12 @@
 
   function updateCart() {
     const books = state.cart.map(findBook).filter(Boolean);
-    const count = state.books.length ? books.length : state.cart.length;
+    const count = state.cart.length;
     if (els.cartBooks) els.cartBooks.textContent = fmt(count);
     document.querySelectorAll("#navCartCount").forEach((item) => { item.textContent = fmt(count); });
     if (els.floatCartCount) els.floatCartCount.textContent = fmt(count);
     if (!els.cartItems) return;
-    if (!state.books.length && state.cart.length) {
+    if (books.length < state.cart.length) {
       els.cartItems.innerHTML = loadingBlock("장바구니 정보를 불러오는 중입니다.");
       els.applyCart.disabled = true;
       return;
@@ -994,7 +1123,7 @@
   }
 
   function cover(book, priority) {
-    const meta = state.coverCache[book.bookId] || {};
+    const meta = cachedBookMeta(book.bookId) || {};
     if (book.cover || meta.cover) {
       return `<div class="cover image-cover" data-cover-book="${attr(book.bookId)}"><img src="${attr(book.cover || meta.cover)}" ${coverImageAttrs(book.title, priority)} /></div>`;
     }
@@ -1006,14 +1135,34 @@
   }
 
   function updateSummaryCounts() {
+    if (state.remoteCatalog) {
+      if (state.catalogSummary) {
+        if (els.totalBooks) els.totalBooks.textContent = fmt(state.catalogSummary.total);
+        if (els.availableBooks) els.availableBooks.textContent = fmt(state.catalogSummary.available);
+      }
+      return;
+    }
     if (els.totalBooks) els.totalBooks.textContent = fmt(state.books.length);
     if (els.availableBooks) els.availableBooks.textContent = fmt(state.books.filter(canApplyBook).length);
   }
 
   async function hydrateVisibleCovers(books) {
+    state.coverTask = { books, hydrationId: ++state.coverHydrationId };
+    if (state.coverWorkerRunning) return;
+    state.coverWorkerRunning = true;
+    try {
+      while (state.coverTask) {
+        const task = state.coverTask;
+        state.coverTask = null;
+        await runCoverHydration(task.books, task.hydrationId);
+      }
+    } finally { state.coverWorkerRunning = false; }
+  }
+
+  async function runCoverHydration(books, hydrationId) {
     if (!config.appsScriptUrl) return;
     const missing = books
-      .filter((book) => book && !book.cover && !(state.coverCache[book.bookId] && state.coverCache[book.bookId].cover))
+      .filter((book) => book && !book.cover && !cachedBookMeta(book.bookId))
       .map((book) => ({
         bookId: book.bookId,
         title: book.title,
@@ -1022,7 +1171,6 @@
       }));
     if (!missing.length) return;
 
-    const hydrationId = ++state.coverHydrationId;
     const priority = missing.slice(0, COVER_PRIORITY_BATCH_SIZE);
     const background = missing.slice(COVER_PRIORITY_BATCH_SIZE);
     await hydrateCoverBatch(priority, hydrationId, true);
@@ -1040,11 +1188,11 @@
       if (payload.ok && payload.items) {
         Object.keys(payload.items).forEach((bookId) => {
           const meta = payload.items[bookId];
-          if (!meta || (!meta.cover && !meta.description)) return;
-          state.coverCache[bookId] = meta;
-          updateCoverElement(bookId, meta, priority);
+          if (!meta) return;
+          state.coverCache[bookId] = { ...meta, cachedAt: Date.now() };
+          if (state.coverHydrationId === hydrationId) updateCoverElement(bookId, meta, priority);
         });
-        saveJson("careerBookCoverCache", state.coverCache);
+        saveJson("careerBookCoverCacheV2", state.coverCache);
         return;
       }
     } catch (error) {
@@ -1057,7 +1205,7 @@
       const book = findBook(fallback[index].bookId);
       if (!book) continue;
       const meta = await metaFromAladin(book);
-      if (meta && meta.cover) updateCoverElement(book.bookId, meta, priority);
+      if (state.coverHydrationId === hydrationId && meta && meta.cover) updateCoverElement(book.bookId, meta, priority);
     }
   }
 
@@ -1069,6 +1217,18 @@
       }
       window.setTimeout(resolve, COVER_BACKGROUND_DELAY_MS);
     });
+  }
+
+  function loadCoverCache() {
+    const cache = loadJson("careerBookCoverCacheV2", {});
+    return Object.fromEntries(Object.entries(cache).filter(([, meta]) => meta && Date.now() - meta.cachedAt < 21600000));
+  }
+
+  function cachedBookMeta(bookId) {
+    const meta = state.coverCache[bookId];
+    if (meta && Date.now() - meta.cachedAt < 21600000) return meta;
+    delete state.coverCache[bookId];
+    return null;
   }
 
   function updateCoverElement(bookId, meta, priority) {
@@ -1106,10 +1266,10 @@
   }
 
   async function openCart() {
-    if (!state.books.length) {
+    if (state.cart.some((id) => !findBook(id))) {
       showLoading("장바구니 정보를 불러오는 중입니다.");
       try {
-        await loadBooks();
+        await loadBookIds(state.cart);
       } catch (error) {
         toast("장바구니 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.");
       } finally {
@@ -1193,6 +1353,7 @@
 
   function hasPendingBook(book) {
     if (!book) return false;
+    if (typeof book.pending === "boolean") return book.pending;
     return [book.bookId, book.registrationNo].some((value) => state.pendingIds.has(normalizePendingKey(value)));
   }
 
