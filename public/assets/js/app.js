@@ -453,7 +453,7 @@
     try {
       const payload = await getFromSheet({ action: "pending", refresh: forceRefresh ? "1" : "" });
       const entries = payload.entries || [];
-      state.pendingIds = new Set(entries.map((entry) => entry.bookId).filter(Boolean));
+      state.pendingIds = buildPendingKeySet(entries);
       savePendingIdCache(state.pendingIds);
       if (shouldRender) {
         updateSummaryCounts();
@@ -493,7 +493,7 @@
       if (state.category !== "전체" && book.category !== state.category) return false;
       if (query && !book.searchText.includes(query)) return false;
       if (els.availableOnly.checked && !canApplyBook(book)) return false;
-      if (els.hidePending.checked && state.pendingIds.has(book.bookId)) return false;
+      if (els.hidePending.checked && hasPendingBook(book)) return false;
       return true;
     });
     state.filtered.sort((a, b) => {
@@ -521,7 +521,7 @@
   }
 
   function renderBookCard(book, index) {
-    const pending = state.pendingIds.has(book.bookId);
+    const pending = hasPendingBook(book);
     const canApply = canApplyBook(book);
     const status = pending ? "신청 진행중" : book.status || "신청가능";
     return `<article class="book-card">
@@ -659,7 +659,7 @@
 
   function addCart(bookId) {
     const book = findBook(bookId);
-    if (!book || state.pendingIds.has(bookId) || !available(book)) return toast("이미 신청 진행중이거나 마감된 도서입니다.");
+    if (!book || hasPendingBook(book) || !available(book)) return toast("이미 신청 진행중이거나 마감된 도서입니다.");
     if (!state.cart.includes(bookId)) {
       state.cart.push(bookId);
       saveJson("careerBookCart", state.cart);
@@ -702,7 +702,7 @@
       setTimeout(() => location.href = "index.html", 700);
       return;
     }
-    const selected = (books || []).filter(Boolean).filter((book) => available(book) && !state.pendingIds.has(book.bookId));
+    const selected = (books || []).filter(Boolean).filter((book) => available(book) && !hasPendingBook(book));
     if (!selected.length) return toast("신청 가능한 도서를 먼저 선택해주세요.");
     state.selectedBooks = selected;
     els.applyForm.querySelectorAll('[name="pickupCampus"]').forEach((input) => { input.checked = false; });
@@ -980,7 +980,7 @@
 
   function updateDetailActionButtons(book, applyButton, cartButton) {
     const canApply = canApplyBook(book);
-    const pending = state.pendingIds.has(book.bookId);
+    const pending = hasPendingBook(book);
     const applyLabel = pending ? "신청 진행중" : available(book) ? "바로 신청" : "신청 마감";
     const cartLabel = pending ? "신청 진행중" : available(book) ? "장바구니 담기" : "신청 마감";
     if (applyButton) {
@@ -1093,11 +1093,16 @@
   }
 
   function available(book) {
-    return (book.status || "신청가능") !== "마감" && Number(book.availableQuantity || 1) > 0;
+    const status = String(book.status || "신청가능").trim();
+    const rawQuantity = book.availableQuantity;
+    const quantity = rawQuantity === "" || rawQuantity === null || rawQuantity === undefined
+      ? 1
+      : Number(rawQuantity);
+    return status !== "마감" && (Number.isFinite(quantity) ? quantity : 1) > 0;
   }
 
   function canApplyBook(book) {
-    return available(book) && !state.pendingIds.has(book.bookId);
+    return available(book) && !hasPendingBook(book);
   }
 
   async function openCart() {
@@ -1165,14 +1170,34 @@
     const cached = loadJson(PENDING_CACHE_KEY, null);
     if (!cached || !Array.isArray(cached.ids)) return new Set();
     if (Date.now() - Number(cached.savedAt || 0) > PENDING_CACHE_MAX_AGE_MS) return new Set();
-    return new Set(cached.ids.map(onlyText).filter(Boolean));
+    return new Set(cached.ids.map(normalizePendingKey).filter(Boolean));
   }
 
   function savePendingIdCache(pendingIds) {
     saveJson(PENDING_CACHE_KEY, {
       savedAt: Date.now(),
-      ids: Array.from(pendingIds || []).filter(Boolean),
+      ids: Array.from(pendingIds || []).map(normalizePendingKey).filter(Boolean),
     });
+  }
+
+  function buildPendingKeySet(entries) {
+    const keys = new Set();
+    (entries || []).forEach((entry) => {
+      [entry.bookId, entry.registrationNo].forEach((value) => {
+        const key = normalizePendingKey(value);
+        if (key) keys.add(key);
+      });
+    });
+    return keys;
+  }
+
+  function hasPendingBook(book) {
+    if (!book) return false;
+    return [book.bookId, book.registrationNo].some((value) => state.pendingIds.has(normalizePendingKey(value)));
+  }
+
+  function normalizePendingKey(value) {
+    return String(value || "").trim();
   }
 
   function normalizeUser(user) {
