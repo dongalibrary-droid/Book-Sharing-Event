@@ -9,6 +9,7 @@ const CONFIG = {
   PENDING_CACHE_SECONDS: 60,
   MAX_BOOKS_PER_REQUEST: 20,
   MAX_META_BATCH_SIZE: 25,
+  META_CONCURRENCY: 6,
   TIME_ZONE: "Asia/Seoul",
   DATETIME_FORMAT: "yyyy-MM-dd HH:mm:ss",
 };
@@ -34,7 +35,6 @@ function doGet(e) {
     if (action === "health") return json_({ ok: true, service: "Dong-A University Library Book Sharing" });
     if (action === "bookMeta") return json_({ ok: true, item: getBookMeta_(params) });
     if (action === "bookMetaBatch") return json_({ ok: true, items: getBookMetaBatch_(params) });
-    ensureSheets_();
     if (action === "settings") return json_({ ok: true, settings: readPublicSettings_() });
     if (action === "books") return json_({ ok: true, books: readBooks_() });
     if (action === "pending") return json_({ ok: true, entries: readPendingRequests_(params.refresh === "1") });
@@ -49,7 +49,6 @@ function doPost(e) {
   try {
     const payload = parsePost_(e);
     if (payload.action === "bookMetaBatch") return json_({ ok: true, items: getBookMetaBatch_(payload) });
-    ensureSheets_();
     if (payload.action === "login") return json_(loginUser_(payload));
     if (payload.action === "submitApplication") return json_(submitApplication_(payload));
     if (payload.action === "cancelApplication") return json_(cancelApplication_(payload));
@@ -132,7 +131,7 @@ function submitApplication_(payload) {
   try {
     const ss = getSpreadsheet_();
     const requestSheet = ss.getSheetByName(CONFIG.REQUEST_SHEET_NAME);
-    const bookMap = getBookMap_();
+    const bookMap = getBookMap_(books);
     const pendingIds = getPendingBookIdSet_();
     const now = nowKst_();
     const rows = [];
@@ -142,14 +141,16 @@ function submitApplication_(payload) {
       const bookId = requireText_(item.bookId, "도서ID");
       const book = bookMap[bookId];
       if (!book) throw new Error("도서목록에서 찾을 수 없는 도서입니다: " + bookId);
-      if (book.status === "마감" || Number(book.availableQuantity || 1) <= 0) throw new Error("이미 마감된 도서입니다: " + book.title);
+      if (book.status === "마감" || book.availableQuantity <= 0) throw new Error("이미 마감된 도서입니다: " + book.title);
       if (pendingIds[bookId]) throw new Error("이미 신청 진행중인 도서입니다: " + book.title);
+      pendingIds[bookId] = true;
       const requestId = Utilities.getUuid();
       requestIds.push(requestId);
       rows.push([requestId, now, "신청접수", studentName, studentId, "", phone, "", source, bookId, book.registrationNo, book.title, book.author, book.isbn13 || item.isbn13 || "", memo, "", "", pickupCampus]);
     });
 
     requestSheet.getRange(requestSheet.getLastRow() + 1, 1, rows.length, REQUEST_HEADERS.length).setValues(rows);
+    SpreadsheetApp.flush();
     CacheService.getScriptCache().remove("careerBookPending");
     return { ok: true, requestIds: requestIds, count: rows.length };
   } finally {
@@ -158,6 +159,16 @@ function submitApplication_(payload) {
 }
 
 function cancelApplication_(payload) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    return cancelApplicationLocked_(payload);
+  } finally {
+    try { SpreadsheetApp.flush(); } finally { lock.releaseLock(); }
+  }
+}
+
+function cancelApplicationLocked_(payload) {
   const requestId = requireText_(payload.requestId, "신청ID");
   const studentId = requireText_(payload.studentId, "학번/직번");
   const phone = normalizePhone_(requireText_(payload.phone, "휴대폰번호"));
@@ -244,9 +255,8 @@ function readPublicSettings_() {
 }
 
 function readPendingRequests_(forceRefresh) {
-  const cache = CacheService.getScriptCache();
-  const cached = forceRefresh ? "" : cache.get("careerBookPending");
-  if (cached) return JSON.parse(cached);
+  const cached = forceRefresh ? null : readCacheJson_("careerBookPending");
+  if (cached) return cached;
   const sheet = getSpreadsheet_().getSheetByName(CONFIG.REQUEST_SHEET_NAME);
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
@@ -273,7 +283,7 @@ function readPendingRequests_(forceRefresh) {
       author: cell_(row, indexes, "저자"),
     });
   }
-  cache.put("careerBookPending", JSON.stringify(entries), CONFIG.PENDING_CACHE_SECONDS);
+  writeCacheJson_("careerBookPending", entries, CONFIG.PENDING_CACHE_SECONDS);
   return entries;
 }
 
@@ -297,12 +307,68 @@ function getBookMeta_(params) {
 function getBookMetaBatch_(params) {
   const items = parseMetaItems_(params.items);
   const result = {};
+  const key = getAladinKey_();
+  const jobs = [];
   items.slice(0, CONFIG.MAX_META_BATCH_SIZE).forEach(function (item) {
+    if (!item) return;
     const bookId = String(item.bookId || "").trim();
     if (!bookId) return;
-    result[bookId] = getBookMeta_(item);
+    const isbn = String(item.isbn13 || "").replace(/[^0-9Xx]/g, "");
+    const title = String(item.title || "").trim();
+    const author = String(item.author || "").trim();
+    const cacheKey = "aladinMeta:" + (isbn || Utilities.base64EncodeWebSafe(title + "|" + author).slice(0, 80));
+    const cached = readCacheJson_(cacheKey);
+    result[bookId] = cached || normalizeAladinItem_(null);
+    if (cached || !key) return;
+    const urls = [];
+    if (isbn) urls.push(CONFIG.ALADIN_API_BASE + "ItemLookUp.aspx?" + toQuery_({ ttbkey: key, itemIdType: "ISBN13", ItemId: isbn, output: "js", Version: CONFIG.ALADIN_VERSION, Cover: "Big" }));
+    if (title) buildAladinQueries_(title, author).forEach(function (query) {
+      urls.push(CONFIG.ALADIN_API_BASE + "ItemSearch.aspx?" + toQuery_({ ttbkey: key, Query: query.query, QueryType: query.type, SearchTarget: "Book", MaxResults: 1, start: 1, output: "js", Version: CONFIG.ALADIN_VERSION, Cover: "Big" }));
+    });
+    jobs.push({ bookId: bookId, cacheKey: cacheKey, urls: urls, next: 0, done: false });
   });
+  // Preserve search priority within each book, fetch different books together.
+  while (true) {
+    const pending = jobs.filter(function (job) { return !job.done && job.next < job.urls.length; });
+    if (!pending.length) break;
+    for (let offset = 0; offset < pending.length; offset += CONFIG.META_CONCURRENCY) {
+      const batch = pending.slice(offset, offset + CONFIG.META_CONCURRENCY);
+      let responses;
+      try {
+        responses = UrlFetchApp.fetchAll(batch.map(function (job) { return { url: job.urls[job.next++], muteHttpExceptions: true }; }));
+      } catch (error) {
+        batch.forEach(function (job) { job.done = true; });
+        continue;
+      }
+      batch.forEach(function (job, index) {
+        try {
+          const response = responses[index];
+          if (response.getResponseCode() >= 400) { job.done = true; return; }
+          const data = JSON.parse(response.getContentText());
+          if (data.errorCode) { job.done = true; return; }
+          const found = data.item && data.item[0];
+          if (found) {
+            result[job.bookId] = normalizeAladinItem_(found);
+            job.done = true;
+          }
+          if (found || job.next === job.urls.length) writeCacheJson_(job.cacheKey, result[job.bookId], CONFIG.META_CACHE_SECONDS);
+        } catch (error) { job.done = true; }
+      });
+    }
+  }
   return result;
+}
+
+function readCacheJson_(key) {
+  try {
+    const value = CacheService.getScriptCache().get(key);
+    return value ? JSON.parse(value) : null;
+  } catch (error) { return null; }
+}
+
+function writeCacheJson_(key, value, seconds) {
+  // Cache eviction/size limits must not turn a successful read into an error.
+  try { CacheService.getScriptCache().put(key, JSON.stringify(value), seconds); } catch (error) {}
 }
 
 function aladinLookupByIsbn_(key, isbn13) {
@@ -384,15 +450,44 @@ function cleanAuthorText_(value) {
     .trim();
 }
 
-function getBookMap_() {
+function getBookMap_(requestedBooks) {
   const map = {};
-  readBooks_().forEach(function (book) { map[book.bookId] = book; });
+  const sheet = getSpreadsheet_().getSheetByName(CONFIG.BOOK_SHEET_NAME);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return map;
+  const indexes = headerIndexes_(sheet.getRange(1, 1, 1, BOOK_HEADERS.length).getDisplayValues()[0]);
+  const wanted = new Set(requestedBooks.map(function (item) { return requireText_(item.bookId, "도서ID"); }));
+  // Large carts use one bulk read instead of up to twenty remote row reads.
+  if (wanted.size > 4) {
+    sheet.getRange(2, 1, lastRow - 1, BOOK_HEADERS.length).getDisplayValues().forEach(function (row) {
+      if (!wanted.has(cell_(row, indexes, "도서ID"))) return;
+      const book = rowToBook_(row, indexes);
+      map[book.bookId] = book;
+    });
+    return map;
+  }
+  // Build a fresh, narrow ID index so sorting/inserting sheet rows cannot stale it.
+  const ids = sheet.getRange(2, indexes["도서ID"] + 1, lastRow - 1, 1).getDisplayValues();
+  ids.forEach(function (row, index) {
+    if (!wanted.has(String(row[0]).trim())) return;
+    const book = rowToBook_(sheet.getRange(index + 2, 1, 1, BOOK_HEADERS.length).getDisplayValues()[0], indexes);
+    map[book.bookId] = book;
+  });
   return map;
 }
 
 function getPendingBookIdSet_() {
   const set = {};
-  readPendingRequests_().forEach(function (entry) { set[entry.bookId] = true; });
+  // Never use a display cache to authorize an application.
+  const sheet = getSpreadsheet_().getSheetByName(CONFIG.REQUEST_SHEET_NAME);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return set;
+  const indexes = headerIndexes_(sheet.getRange(1, 1, 1, REQUEST_HEADERS.length).getDisplayValues()[0]);
+  const ids = sheet.getRange(2, indexes["도서ID"] + 1, lastRow - 1, 1).getDisplayValues();
+  const statuses = sheet.getRange(2, indexes["상태"] + 1, lastRow - 1, 1).getDisplayValues();
+  ids.forEach(function (row, i) {
+    if (["신청접수", "처리중", "확정"].indexOf(String(statuses[i][0]).trim()) !== -1) set[String(row[0]).trim()] = true;
+  });
   return set;
 }
 
@@ -410,7 +505,7 @@ function rowToBook_(row, indexes) {
     isbn13: cell_(row, indexes, "ISBN13"),
     category: cell_(row, indexes, "카테고리") || "기타",
     status: cell_(row, indexes, "상태") || "신청가능",
-    availableQuantity: Number(cell_(row, indexes, "신청가능수량")) || 1,
+    availableQuantity: cell_(row, indexes, "신청가능수량") === "" ? 1 : Number(cell_(row, indexes, "신청가능수량")),
     note: cell_(row, indexes, "비고"),
   };
 }

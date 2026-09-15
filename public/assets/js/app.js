@@ -432,7 +432,7 @@
 
   async function loadBooks() {
     if (state.books.length) return;
-    const response = await fetch(config.dataUrl || "assets/data/career-books.json", { cache: "no-store" });
+    const response = await fetch(config.dataUrl || "assets/data/career-books.json", { cache: "no-cache" });
     if (!response.ok) throw new Error("도서 목록을 불러오지 못했습니다.");
     const payload = await response.json();
     state.books = (payload.books || []).map((book) => ({
@@ -452,6 +452,7 @@
     }
     try {
       const payload = await getFromSheet({ action: "pending", refresh: forceRefresh ? "1" : "" });
+      if (!payload.ok || !Array.isArray(payload.entries)) throw new Error(payload.message || "신청 상태를 불러오지 못했습니다.");
       const entries = payload.entries || [];
       state.pendingIds = buildPendingKeySet(entries);
       savePendingIdCache(state.pendingIds);
