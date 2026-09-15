@@ -36,8 +36,7 @@ function doGet(e) {
     if (action === "bookMetaBatch") return json_({ ok: true, items: getBookMetaBatch_(params) });
     ensureSheets_();
     if (action === "settings") return json_({ ok: true, settings: readPublicSettings_() });
-    if (action === "bookStats") return json_({ ok: true, stats: readBookStats_() });
-    if (action === "books") return json_(readBooksResponse_(params));
+    if (action === "books") return json_({ ok: true, books: readBooks_() });
     if (action === "pending") return json_({ ok: true, entries: readPendingRequests_(params.refresh === "1") });
     if (action === "myRequests") return json_({ ok: true, entries: readMyRequests_(params) });
     return json_({ ok: false, message: "지원하지 않는 요청입니다." });
@@ -226,114 +225,6 @@ function readBooks_() {
   const values = sheet.getRange(1, 1, lastRow, BOOK_HEADERS.length).getDisplayValues();
   const indexes = headerIndexes_(values[0]);
   return values.slice(1).map(function (row) { return rowToBook_(row, indexes); }).filter(function (book) { return book.bookId && book.title; });
-}
-
-function readBooksResponse_(params) {
-  const books = readBooks_();
-  const ids = parseCsv_(params.ids);
-  const bookId = String(params.bookId || "").trim();
-  if (bookId) ids.push(bookId);
-
-  if (ids.length) {
-    const idSet = {};
-    ids.forEach(function (id) { if (id) idSet[id] = true; });
-    const selected = books.filter(function (book) { return idSet[book.bookId]; });
-    return {
-      ok: true,
-      books: selected,
-      total: selected.length,
-      page: 1,
-      pageSize: selected.length,
-      pageCount: 1,
-      stats: buildBookStats_(books)
-    };
-  }
-
-  const page = positiveInt_(params.page, 0);
-  const pageSize = Math.min(100, positiveInt_(params.pageSize, 0));
-  if (!page || !pageSize) return { ok: true, books: books };
-
-  const filtered = filterBooks_(books, params);
-  const total = filtered.length;
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const safePage = Math.max(1, Math.min(page, pageCount));
-  const start = (safePage - 1) * pageSize;
-
-  return {
-    ok: true,
-    books: filtered.slice(start, start + pageSize),
-    total: total,
-    page: safePage,
-    pageSize: pageSize,
-    pageCount: pageCount,
-    stats: buildBookStats_(books)
-  };
-}
-
-function readBookStats_() {
-  return buildBookStats_(readBooks_());
-}
-
-function buildBookStats_(books) {
-  const categories = {};
-  let available = 0;
-  books.forEach(function (book) {
-    const category = book.category || "기타";
-    if (!categories[category]) categories[category] = { category: category, count: 0, available: 0 };
-    categories[category].count += 1;
-    if (isBookAvailable_(book)) {
-      available += 1;
-      categories[category].available += 1;
-    }
-  });
-
-  return {
-    total: books.length,
-    available: available,
-    categories: Object.keys(categories).map(function (key) { return categories[key]; }).sort(function (a, b) {
-      return b.count - a.count || a.category.localeCompare(b.category, "ko");
-    })
-  };
-}
-
-function filterBooks_(books, params) {
-  const category = String(params.category || "").trim();
-  const query = normalizeSearch_(params.query);
-  const availableOnly = String(params.availableOnly || "") === "1";
-  const sort = String(params.sort || "sourceNo");
-
-  const filtered = books.filter(function (book) {
-    if (category && category !== "전체" && book.category !== category) return false;
-    if (availableOnly && !isBookAvailable_(book)) return false;
-    if (query && normalizeSearch_([book.title, book.author, book.registrationNo, book.callNo, book.category].join(" ")).indexOf(query) === -1) return false;
-    return true;
-  });
-
-  filtered.sort(function (a, b) {
-    if (sort === "title") return String(a.title || "").localeCompare(String(b.title || ""), "ko");
-    if (sort === "year") return Number(b.publicationYear || 0) - Number(a.publicationYear || 0);
-    if (sort === "price") return Number(b.price || 0) - Number(a.price || 0);
-    return Number(a.sourceNo || 0) - Number(b.sourceNo || 0);
-  });
-
-  return filtered;
-}
-
-function isBookAvailable_(book) {
-  return (book.status || "신청가능") !== "마감" && Number(book.availableQuantity || 1) > 0;
-}
-
-function parseCsv_(value) {
-  return String(value || "").split(",").map(function (item) { return item.trim(); }).filter(Boolean);
-}
-
-function positiveInt_(value, fallback) {
-  const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
-}
-
-function normalizeSearch_(value) {
-  return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 function readPublicSettings_() {
