@@ -7,8 +7,10 @@ const CONFIG = {
   ALADIN_VERSION: "20131101",
   META_CACHE_SECONDS: 21600,
   PENDING_CACHE_SECONDS: 60,
+  BOOK_STATS_CACHE_SECONDS: 60,
   MAX_BOOKS_PER_REQUEST: 20,
   MAX_META_BATCH_SIZE: 25,
+  MAX_BOOK_PAGE_SIZE: 100,
   TIME_ZONE: "Asia/Seoul",
   DATETIME_FORMAT: "yyyy-MM-dd HH:mm:ss",
 };
@@ -152,6 +154,7 @@ function submitApplication_(payload) {
 
     requestSheet.getRange(requestSheet.getLastRow() + 1, 1, rows.length, REQUEST_HEADERS.length).setValues(rows);
     CacheService.getScriptCache().remove("careerBookPending");
+    CacheService.getScriptCache().remove("careerBookStats");
     return { ok: true, requestIds: requestIds, count: rows.length };
   } finally {
     lock.releaseLock();
@@ -178,6 +181,7 @@ function cancelApplication_(payload) {
     sheet.getRange(index + 1, indexes["상태"] + 1).setValue("취소");
     sheet.getRange(index + 1, indexes["처리일시"] + 1).setValue(nowKst_());
     CacheService.getScriptCache().remove("careerBookPending");
+    CacheService.getScriptCache().remove("careerBookStats");
     return { ok: true };
   }
   throw new Error("신청내역을 찾을 수 없습니다.");
@@ -229,30 +233,29 @@ function readBooks_() {
 }
 
 function readBooksResponse_(params) {
-  const books = readBooks_();
   const ids = parseCsv_(params.ids);
   const bookId = String(params.bookId || "").trim();
   if (bookId) ids.push(bookId);
 
   if (ids.length) {
-    const idSet = {};
-    ids.forEach(function (id) { if (id) idSet[id] = true; });
-    const selected = books.filter(function (book) { return idSet[book.bookId]; });
+    const selected = readBooksByIds_(ids);
     return {
       ok: true,
       books: selected,
       total: selected.length,
       page: 1,
       pageSize: selected.length,
-      pageCount: 1,
-      stats: buildBookStats_(books)
+      pageCount: 1
     };
   }
 
   const page = positiveInt_(params.page, 0);
-  const pageSize = Math.min(100, positiveInt_(params.pageSize, 0));
-  if (!page || !pageSize) return { ok: true, books: books };
+  const pageSize = Math.min(CONFIG.MAX_BOOK_PAGE_SIZE, positiveInt_(params.pageSize, 0));
+  if (!page || !pageSize) return { ok: true, books: readBooks_() };
 
+  if (canReadContiguousBookPage_(params)) return readContiguousBookPage_(page, pageSize);
+
+  const books = readBooks_();
   const filtered = filterBooks_(books, params);
   const total = filtered.length;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -265,13 +268,23 @@ function readBooksResponse_(params) {
     total: total,
     page: safePage,
     pageSize: pageSize,
-    pageCount: pageCount,
-    stats: buildBookStats_(books)
+    pageCount: pageCount
   };
 }
 
 function readBookStats_() {
-  return buildBookStats_(readBooks_());
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get("careerBookStats");
+  if (cached) return JSON.parse(cached);
+
+  const sheet = getSpreadsheet_().getSheetByName(CONFIG.BOOK_SHEET_NAME);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { total: 0, available: 0, categories: [] };
+
+  const values = sheet.getRange(2, 11, lastRow - 1, 3).getDisplayValues();
+  const stats = buildBookStatsFromSummaryRows_(values);
+  cache.put("careerBookStats", JSON.stringify(stats), CONFIG.BOOK_STATS_CACHE_SECONDS);
+  return stats;
 }
 
 function buildBookStats_(books) {
@@ -334,6 +347,83 @@ function positiveInt_(value, fallback) {
 
 function normalizeSearch_(value) {
   return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function canReadContiguousBookPage_(params) {
+  const category = String(params.category || "").trim();
+  const query = String(params.query || "").trim();
+  const availableOnly = String(params.availableOnly || "") === "1";
+  const sort = String(params.sort || "sourceNo");
+  return (!category || category === "전체") && !query && !availableOnly && sort === "sourceNo";
+}
+
+function readContiguousBookPage_(page, pageSize) {
+  const sheet = getSpreadsheet_().getSheetByName(CONFIG.BOOK_SHEET_NAME);
+  const lastRow = sheet.getLastRow();
+  const total = Math.max(0, lastRow - 1);
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.max(1, Math.min(page, pageCount));
+  const startRow = 2 + (safePage - 1) * pageSize;
+  const rowCount = Math.max(0, Math.min(pageSize, lastRow - startRow + 1));
+  const values = rowCount ? sheet.getRange(startRow, 1, rowCount, BOOK_HEADERS.length).getDisplayValues() : [];
+
+  return {
+    ok: true,
+    books: rowsToBooks_(values),
+    total: total,
+    page: safePage,
+    pageSize: pageSize,
+    pageCount: pageCount
+  };
+}
+
+function readBooksByIds_(ids) {
+  const sheet = getSpreadsheet_().getSheetByName(CONFIG.BOOK_SHEET_NAME);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  const unique = {};
+  ids.forEach(function (id) { if (id) unique[id] = true; });
+  const rows = {};
+  Object.keys(unique).forEach(function (id) {
+    const range = sheet.getRange(2, 1, lastRow - 1, 1).createTextFinder(id).matchEntireCell(true).findNext();
+    if (range) rows[range.getRow()] = true;
+  });
+
+  return Object.keys(rows).sort(function (a, b) { return Number(a) - Number(b); }).map(function (rowNumber) {
+    const row = sheet.getRange(Number(rowNumber), 1, 1, BOOK_HEADERS.length).getDisplayValues()[0];
+    return rowToBook_(row, headerIndexes_(BOOK_HEADERS));
+  }).filter(function (book) { return book.bookId && book.title; });
+}
+
+function rowsToBooks_(values) {
+  const indexes = headerIndexes_(BOOK_HEADERS);
+  return values.map(function (row) { return rowToBook_(row, indexes); }).filter(function (book) { return book.bookId && book.title; });
+}
+
+function buildBookStatsFromSummaryRows_(values) {
+  const categories = {};
+  let available = 0;
+  let total = 0;
+  values.forEach(function (row) {
+    const category = String(row[0] || "기타").trim() || "기타";
+    const status = String(row[1] || "신청가능").trim();
+    const availableQuantity = Number(row[2]) || 1;
+    total += 1;
+    if (!categories[category]) categories[category] = { category: category, count: 0, available: 0 };
+    categories[category].count += 1;
+    if (status !== "마감" && availableQuantity > 0) {
+      available += 1;
+      categories[category].available += 1;
+    }
+  });
+
+  return {
+    total: total,
+    available: available,
+    categories: Object.keys(categories).map(function (key) { return categories[key]; }).sort(function (a, b) {
+      return b.count - a.count || a.category.localeCompare(b.category, "ko");
+    })
+  };
 }
 
 function readPublicSettings_() {
