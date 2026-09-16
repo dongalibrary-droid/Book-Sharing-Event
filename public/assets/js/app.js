@@ -1,6 +1,7 @@
 (function () {
   const config = window.CAREER_BOOKS_CONFIG || {};
   const SETTINGS_TYPE_DELAY_MS = 5000;
+  const PRIORITY_COVER_COUNT = 6;
   const READ_TIMEOUT_MS = 15000;
   const WRITE_TIMEOUT_MS = 30000;
   const metadataInFlight = new Map();
@@ -530,7 +531,7 @@
     const canApply = canApplyBook(book);
     const status = pending ? "신청 진행중" : book.status || "신청가능";
     return `<article class="book-card">
-      ${cover(book, index < COVER_PRIORITY_BATCH_SIZE)}
+      ${cover(book, index < PRIORITY_COVER_COUNT)}
       <div>
         <span class="status${canApply ? "" : " closed"}">${html(status)}</span>
         <h3 class="book-title">${html(book.title)}</h3>
