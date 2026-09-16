@@ -3,15 +3,16 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('public/assets/js/app.js', 'utf8').replace(/\}\)\(\);\s*$/, `
   window.testApi = { fetchJson, postToSheet, loadBookMetadata, metaFromAladin, saveJson, state };
-  window.testApi.catalogInit = async () => {
+  window.testApi.catalogInit = () => {
     let rendered = false;
+    let release;
     ensureSharedUi = ensureFooter = collectElements = renderAuth = bindCommon = applySiteSettings = loadSiteSettings = updateCart = bindCatalog = renderCategories = () => {};
     loadBooks = async () => {};
-    refreshPending = () => new Promise(() => {});
+    refreshPending = () => new Promise(resolve => { release = resolve; });
     withLoading = (_, task) => task();
     filterBooks = () => { rendered = true; };
-    await init();
-    return rendered;
+    const work = init();
+    return { work, release, rendered: () => rendered };
   };
 })();`);
 const context = vm.createContext({
@@ -48,6 +49,11 @@ const api = context.window.testApi;
   await api.loadBookMetadata([{bookId:'failure'}]);
   await api.loadBookMetadata([{bookId:'failure2'}]);
   assert.equal(calls, 2, 'failed batch has no individual fallback or immediate retry');
-  assert.equal(await Promise.race([api.catalogInit(), new Promise(resolve => setTimeout(() => resolve(false), 50))]), true, 'catalog renders and finishes initial loading even when pending never responds');
+  const initial = api.catalogInit();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(initial.rendered(), false, 'initial catalog waits behind the spinner for availability');
+  initial.release(true);
+  await initial.work;
+  assert.equal(initial.rendered(), true, 'catalog renders after availability completes');
   console.log('PASS: response-body deadline, uncertain-write guidance, optional storage, shared lookup, negative caching, static metadata, failure cooldown');
 })().catch(error => { console.error(error); process.exitCode = 1; });

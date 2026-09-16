@@ -17,7 +17,7 @@ function fixture() {
     window: {CAREER_BOOKS_CONFIG:{appsScriptUrl:'https://example.org/exec'}, confirm:()=>true, messages:[], refreshes:0},
     document: {body:{dataset:{page:'status'}}, addEventListener:()=>{}, querySelectorAll:()=>[]},
     localStorage:{getItem:()=>null, setItem:()=>{}}, URL, AbortController, console,
-    setTimeout:(fn,ms)=>{const key=++id; if(ms===1500) queueMicrotask(fn); else timers.set(key,{fn,ms}); return key;},
+    setTimeout:(fn,ms)=>{const key=++id; if(ms===1500 || ms===1000) queueMicrotask(fn); else timers.set(key,{fn,ms}); return key;},
     clearTimeout:key=>timers.delete(key),
     fetch:(url,options)=>new Promise((resolve,reject)=>{
       calls.push({url,options,resolve,reject});
@@ -90,7 +90,13 @@ const cancelled=id=>({requestId:id,status:'취소'});
   respond(f.calls[0],{ok:true,entries:[{requestId:'a',status:'신청접수'}]}); await work;
   assert.equal(f.api.state.myRequests[0].status,'취소','late read cannot undo a confirmed cancellation');
   work=f.api.loadMyRequests(false);
-  respond(f.calls[1],{ok:false,message:'read failed'}); await work;
+  respond(f.calls[1],{ok:false,message:'read failed'}); await tick();
+  respond(f.calls[2],{ok:false,message:'read failed'}); await work;
   assert.equal(f.api.state.myRequests[0].status,'취소','failed refresh preserves known result');
+  f=fixture(); work=f.api.loadMyRequests(false);
+  assert.equal(f.api.loadMyRequests(true),work,'status refreshes share an in-flight request');
+  [...f.timers.values()].find(t=>t.ms===20000).fn(); await tick();
+  respond(f.calls[1],{ok:true,entries:[cancelled('a')]}); await work;
+  assert.equal(f.api.state.myRequests[0].status,'취소','status read retries a timeout and renders the recovered result');
   console.log('Cancellation response recovery, bounded reads, partial results and stale-read checks passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

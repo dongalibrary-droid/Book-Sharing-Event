@@ -6,6 +6,9 @@
   const WRITE_TIMEOUT_MS = 30000;
   const CANCEL_TIMEOUT_MS = 15000;
   let myRequestsRevision = 0;
+  let myRequestsRequest = null;
+  const COVER_CACHE_KEY = "careerBookSavedCoversV1";
+  const COVER_CACHE_AGE_MS = 6 * 60 * 60 * 1000;
   const metadataInFlight = new Map();
   let metadataRetryAfter = 0;
   const PENDING_CACHE_KEY = "careerBookPendingIds";
@@ -73,11 +76,12 @@
     renderAuth();
     bindCommon();
     applySiteSettings();
+    let initialAvailability;
     if (pageName === "catalog" || pageName === "detail") {
       // Start availability before catalog, settings and cover requests.
-      refreshPending(false).then(() => loadSiteSettings());
+      initialAvailability = refreshPending(false);
       startPendingRefresh();
-    } else {
+    } else if (pageName !== "status") {
       loadSiteSettings();
     }
 
@@ -92,24 +96,26 @@
 
     if (pageName === "catalog") {
       await withLoading("도서 목록을 불러오는 중입니다.", async () => {
-        await loadBooks();
+        await prepareInitialBooks(initialAvailability);
         state.catalogReady = true;
         updateCart();
         bindCatalog();
         renderCategories();
         filterBooks();
       });
+      loadSiteSettings();
       return;
     }
 
     if (pageName === "detail") {
       bindDetailPage();
       await withLoading("도서 정보를 불러오는 중입니다.", async () => {
-        await loadBooks();
+        await prepareInitialBooks(initialAvailability);
         state.catalogReady = true;
         updateCart();
         renderDetailPage();
       });
+      loadSiteSettings();
       return;
     }
 
@@ -117,6 +123,7 @@
       updateCart();
       bindStatus();
       await withLoading("신청 진행상황을 불러오는 중입니다.", () => loadMyRequests(false));
+      loadSiteSettings();
       return;
     }
 
@@ -461,7 +468,74 @@
       ...book,
       searchText: normalize(`${book.title} ${book.author} ${book.registrationNo} ${book.callNo} ${book.category}`),
     }));
+    restoreSavedCovers();
     updateSummaryCounts();
+  }
+
+  async function prepareInitialBooks(availability) {
+    await loadBooks();
+    const initialBooks = pageName === "detail"
+      ? state.books.filter(book => book.bookId === new URLSearchParams(location.search).get("id"))
+      : state.books.slice().sort((a, b) => Number(a.sourceNo || 0) - Number(b.sourceNo || 0)).slice(0, state.perPage);
+    // Fetch saved covers while availability loads; missing metadata is optional.
+    const metadata = loadBookMetadata(initialBooks, { priority: true });
+    await availability;
+    await waitUpTo(metadata, 2000);
+    await waitUpTo(preloadCovers(initialBooks.slice(0, PRIORITY_COVER_COUNT)), 1200);
+  }
+
+  async function waitUpTo(task, ms) {
+    let timer;
+    try {
+      await Promise.race([task, new Promise(resolve => { timer = setTimeout(resolve, ms); })]);
+    } finally { clearTimeout(timer); }
+  }
+
+  function preloadCovers(books) {
+    if (typeof Image === "undefined") return Promise.resolve();
+    return Promise.all(books.map(book => {
+      const meta = book.metadata || state.coverCache[book.bookId] || {};
+      const url = book.cover || meta.cover;
+      if (!url) return Promise.resolve();
+      return new Promise(resolve => {
+        const img = new Image();
+        img.onload = img.onerror = resolve;
+        img.src = url;
+        if (img.complete) resolve();
+      });
+    }));
+  }
+
+  function coverSourceKey(book) {
+    return JSON.stringify([String(book.isbn13 || "").replace(/[^0-9Xx]/g, ""), String(book.title || "").trim(), String(book.author || "").trim()]);
+  }
+
+  function restoreSavedCovers() {
+    const saved = loadJson(COVER_CACHE_KEY, null);
+    if (!saved || saved.endpoint !== config.appsScriptUrl || !Array.isArray(saved.items)) return;
+    const books = new Map(state.books.map(book => [book.bookId, book]));
+    saved.items.forEach(record => {
+      const book = record && books.get(record.id);
+      if (book && record.key === coverSourceKey(book) && record.at <= Date.now() && Date.now() - record.at < COVER_CACHE_AGE_MS && record.item && typeof record.item.cover === "string") {
+        state.coverCache[record.id] = record.item;
+      }
+    });
+  }
+
+  function persistSavedCovers(books) {
+    const saved = loadJson(COVER_CACHE_KEY, null);
+    const records = new Map();
+    if (saved && saved.endpoint === config.appsScriptUrl && Array.isArray(saved.items)) {
+      saved.items.filter(record => record && Date.now() - record.at < COVER_CACHE_AGE_MS).forEach(record => records.set(record.id, record));
+    }
+    books.forEach(book => {
+      const item = state.coverCache[book.bookId];
+      // Do not persist empty/error results while collection is still in progress.
+      if (!item || (!item.cover && !item.description)) return;
+      records.delete(book.bookId);
+      records.set(book.bookId, {id: book.bookId, key: coverSourceKey(book), at: Date.now(), item});
+    });
+    saveJson(COVER_CACHE_KEY, {endpoint: config.appsScriptUrl, items: Array.from(records.values()).slice(-150)});
   }
 
   function refreshPending(manual, options = {}) {
@@ -842,7 +916,17 @@
     }
   }
 
-  async function loadMyRequests(manual) {
+  function loadMyRequests(manual) {
+    if (myRequestsRequest) return myRequestsRequest;
+    myRequestsRequest = loadMyRequestsOnce(manual).finally(() => {
+      myRequestsRequest = null;
+      if (els.refreshMine) els.refreshMine.disabled = false;
+    });
+    return myRequestsRequest;
+  }
+
+  async function loadMyRequestsOnce(manual) {
+    if (els.refreshMine) els.refreshMine.disabled = true;
     if (!els.myRequests) return;
     if (!state.user) {
       state.myRequests = [];
@@ -864,7 +948,16 @@
     if (manual) showLoading("신청 내역을 새로 확인하는 중입니다.");
     const revision = myRequestsRevision;
     try {
-      const fetched = await fetchMyRequestEntries(state.user);
+      const user = state.user;
+      let fetched;
+      try {
+        fetched = await fetchMyRequestEntries(user, 20000);
+      } catch (error) {
+        // Only reads are retried. Allow a transient connection/service error to recover.
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        fetched = await fetchMyRequestEntries(user, 20000);
+      }
+      if (state.user !== user) return;
       const entries = revision === myRequestsRevision ? fetched : state.myRequests;
       state.myRequests = entries;
       state.selectedRequestIds = new Set(Array.from(state.selectedRequestIds).filter((id) => entries.some((entry) => entry.requestId === id && canCancelRequest(entry))));
@@ -1144,10 +1237,10 @@
     books.forEach((book) => updateCoverElement(book.bookId, book.metadata || state.coverCache[book.bookId], false));
   }
 
-  async function loadBookMetadata(books) {
+  async function loadBookMetadata(books, options = {}) {
     if (!config.appsScriptUrl) return;
     // Give the initial status request priority over optional cover/description reads.
-    if (pendingRequest) await pendingRequest;
+    if (pendingRequest && !options.priority) await pendingRequest;
     const missing = books.filter((book) => book && !book.metadata && !state.coverCache[book.bookId]);
     const waiting = missing.map((book) => metadataInFlight.get(book.bookId)).filter(Boolean);
     const fresh = missing.filter((book) => !metadataInFlight.has(book.bookId));
@@ -1158,6 +1251,7 @@
         const request = postToSheet({ action: "savedBookMetaBatch", items }).then((payload) => {
           if (!payload.ok || !payload.items) throw new Error("저장된 도서 정보를 불러오지 못했습니다.");
           batch.forEach((book) => { state.coverCache[book.bookId] = payload.items[book.bookId] || {}; });
+          persistSavedCovers(batch);
         }).catch(() => {
           // Do not turn one failed batch into many individual requests.
           metadataRetryAfter = Date.now() + 60000;
