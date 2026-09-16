@@ -5,6 +5,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'apps-script/career-book-giveaway/Code.gs'), 'utf8');
 const context = vm.createContext({
+  SpreadsheetApp: { flush() {} },
   LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
   CacheService: { getScriptCache: () => ({ remove() {} }) },
   Utilities: { getUuid: () => String(++sequence) },

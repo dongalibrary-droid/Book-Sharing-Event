@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const crypto = require('node:crypto');
 const cache = new Map();
 const batches = [];
 let locked = false;
@@ -9,7 +10,7 @@ const context = vm.createContext({
   Set,
   CacheService: { getScriptCache: () => ({ get: k => cache.get(k), put: (k, v) => cache.set(k, v), remove: k => cache.delete(k) }) },
   PropertiesService: { getScriptProperties: () => ({ getProperty: () => 'test-key' }) },
-  Utilities: { base64EncodeWebSafe: s => Buffer.from(s).toString('base64url'), getUuid: () => 'request', formatDate: () => 'now' },
+  Utilities: { base64EncodeWebSafe: s => Buffer.from(s).toString('base64url'), computeDigest: (_, s) => crypto.createHash('sha256').update(s).digest(), DigestAlgorithm: { SHA_256: 'sha256' }, getUuid: () => 'request', formatDate: () => 'now' },
   LockService: { getScriptLock: () => ({ waitLock: () => { assert.equal(locked, false); locked = true; }, releaseLock: () => { locked = false; } }) },
   SpreadsheetApp: { flush: () => { assert.equal(locked, true); flushed = true; } },
   UrlFetchApp: { fetchAll: requests => {
@@ -25,15 +26,26 @@ const context = vm.createContext({
 vm.runInContext(fs.readFileSync('apps-script/career-book-giveaway/Code.gs', 'utf8'), context);
 const books = Array.from({length: 8}, (_, i) => ({bookId: String(i), title: 'book' + i}));
 books.push({bookId: 'f', title: 'fallback'}, {bookId: 'e', title: 'error'});
-const result = context.getBookMetaBatch_({items: books});
+const result = context.fetchAladinMetaBatch_({items: books});
 assert.equal(result.f.cover, 'cover');
 assert.equal(result.e.cover, '');
 assert.ok(batches.every(batch => batch.length <= 6));
 assert.ok(batches.some(batch => batch.length === 6));
 assert.equal(batches.flat().filter(r => new URL(r.url).searchParams.get('Query') === 'error').length, 1);
 batches.length = 0;
-context.getBookMetaBatch_({items: books.slice(0, 8)});
+context.fetchAladinMetaBatch_({items: books.slice(0, 8)});
 assert.equal(batches.length, 0, 'cached metadata makes no external requests');
+let charged = 0;
+context.reserveMetadataBudget_ = count => { charged += count; return true; };
+context.fetchAladinMetaBatch_({items: [{bookId:'quota', title:'quota'}], reserveBudget: true});
+assert.equal(charged, 1, 'only actual outgoing requests are charged, not seven per book');
+context.fetchAladinMetaBatch_({items: [{bookId:'quota', title:'quota'}], reserveBudget: true});
+assert.equal(charged, 1, 'cache hits use no quota');
+context.reserveMetadataBudget_ = () => false;
+const exhausted = {items: [{bookId:'waiting', title:'waiting'}], reserveBudget: true};
+assert.equal(context.fetchAladinMetaBatch_(exhausted).waiting.collectionStatus, '대기');
+assert.equal(exhausted.budgetExhausted, true);
+assert.equal(result.e.collectionStatus, '오류', 'real API errors remain distinct from quota stops');
 
 // A freshly built ID index stays correct after a sheet sort.
 const headers = vm.runInContext('BOOK_HEADERS', context);

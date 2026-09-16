@@ -1,9 +1,10 @@
 (function () {
   const config = window.CAREER_BOOKS_CONFIG || {};
   const SETTINGS_TYPE_DELAY_MS = 5000;
-  const COVER_PRIORITY_BATCH_SIZE = 6;
-  const COVER_BACKGROUND_BATCH_SIZE = 8;
-  const COVER_BACKGROUND_DELAY_MS = 180;
+  const READ_TIMEOUT_MS = 15000;
+  const WRITE_TIMEOUT_MS = 30000;
+  const metadataInFlight = new Map();
+  let metadataRetryAfter = 0;
   const PENDING_CACHE_KEY = "careerBookPendingIds";
   const PENDING_CACHE_MAX_AGE_MS = 120000;
   const settingsStartedAt = Date.now();
@@ -38,7 +39,7 @@
     selectedRequestIds: new Set(),
     coverHydrationId: 0,
     siteSettings: { ...siteDefaults },
-    coverCache: loadJson("careerBookCoverCache", {}),
+    coverCache: {},
     cart: loadJson("careerBookCart", []),
     user: loadJson("careerBookUser", null),
   };
@@ -46,7 +47,11 @@
   const $ = (id) => document.getElementById(id);
   const els = {};
 
-  document.addEventListener("DOMContentLoaded", init);
+  document.addEventListener("DOMContentLoaded", () => init().catch((error) => {
+    const message = appErrorMessage(error.message);
+    toast(message);
+    if (els.bookResults) els.bookResults.innerHTML = `<p class="empty">${html(message)} 페이지를 새로고침해주세요.</p>`;
+  }));
 
   async function init() {
     ensureSharedUi();
@@ -68,13 +73,13 @@
 
     if (pageName === "catalog") {
       await withLoading("도서 목록을 불러오는 중입니다.", async () => {
-        const pendingPromise = refreshPending(false, { silent: true, render: false });
-        await Promise.all([loadBooks(), pendingPromise]);
+        await loadBooks();
         updateCart();
         bindCatalog();
         renderCategories();
         filterBooks();
       });
+      refreshPending(false, { silent: true });
       return;
     }
 
@@ -432,9 +437,8 @@
 
   async function loadBooks() {
     if (state.books.length) return;
-    const response = await fetch(config.dataUrl || "assets/data/career-books.json", { cache: "no-cache" });
-    if (!response.ok) throw new Error("도서 목록을 불러오지 못했습니다.");
-    const payload = await response.json();
+    const payload = await fetchJson(config.dataUrl || "assets/data/career-books.json", { cache: "no-cache" });
+    if (!Array.isArray(payload.books)) throw new Error("도서 목록 형식이 올바르지 않습니다.");
     state.books = (payload.books || []).map((book) => ({
       ...book,
       searchText: normalize(`${book.title} ${book.author} ${book.registrationNo} ${book.callNo} ${book.category}`),
@@ -637,25 +641,9 @@
   }
 
   async function metaFromAladin(book) {
-    if (!config.appsScriptUrl) return null;
-    if (state.coverCache[book.bookId]) return state.coverCache[book.bookId];
-    try {
-      const payload = await getFromSheet({
-        action: "bookMeta",
-        bookId: book.bookId,
-        title: book.title,
-        author: book.author || "",
-        isbn13: book.isbn13 || "",
-      });
-      const item = payload.ok ? payload.item : null;
-      if (item && (item.cover || item.description)) {
-        state.coverCache[book.bookId] = item;
-        saveJson("careerBookCoverCache", state.coverCache);
-      }
-      return item;
-    } catch (error) {
-      return null;
-    }
+    if (book.metadata) return book.metadata;
+    await loadBookMetadata([book]);
+    return state.coverCache[book.bookId] || null;
   }
 
   function addCart(bookId) {
@@ -933,15 +921,29 @@
   async function getFromSheet(params) {
     const url = new URL(config.appsScriptUrl);
     Object.keys(params).forEach((key) => url.searchParams.set(key, params[key]));
-    const response = await fetch(url.toString(), { cache: "no-store" });
-    if (!response.ok) throw new Error("서버 응답을 받지 못했습니다.");
-    return response.json();
+    return fetchJson(url.toString(), { cache: "no-store" });
   }
 
   async function postToSheet(payload) {
-    const response = await fetch(config.appsScriptUrl, { method: "POST", body: JSON.stringify(payload) });
-    if (!response.ok) throw new Error("서버 응답을 받지 못했습니다.");
-    return response.json();
+    const readOnly = payload.action === "savedBookMetaBatch";
+    return fetchJson(config.appsScriptUrl, { method: "POST", body: JSON.stringify(payload) }, readOnly ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS, !readOnly);
+  }
+
+  async function fetchJson(url, options = {}, timeoutMs = READ_TIMEOUT_MS, mutation = false) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      if (!response.ok) throw new Error("서버 응답을 받지 못했습니다.");
+      // Keep the deadline active while reading and parsing the response body too.
+      return await response.json();
+    } catch (error) {
+      if (mutation) throw new Error("처리 결과를 확인하지 못했습니다. 신청 진행상황을 먼저 확인한 뒤 다시 시도해주세요.");
+      if (error.name === "AbortError") throw new Error("서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.");
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   function appErrorMessage(message) {
@@ -995,7 +997,7 @@
   }
 
   function cover(book, priority) {
-    const meta = state.coverCache[book.bookId] || {};
+    const meta = book.metadata || state.coverCache[book.bookId] || {};
     if (book.cover || meta.cover) {
       return `<div class="cover image-cover" data-cover-book="${attr(book.bookId)}"><img src="${attr(book.cover || meta.cover)}" ${coverImageAttrs(book.title, priority)} /></div>`;
     }
@@ -1012,64 +1014,35 @@
   }
 
   async function hydrateVisibleCovers(books) {
-    if (!config.appsScriptUrl) return;
-    const missing = books
-      .filter((book) => book && !book.cover && !(state.coverCache[book.bookId] && state.coverCache[book.bookId].cover))
-      .map((book) => ({
-        bookId: book.bookId,
-        title: book.title,
-        author: book.author || "",
-        isbn13: book.isbn13 || "",
-      }));
-    if (!missing.length) return;
-
     const hydrationId = ++state.coverHydrationId;
-    const priority = missing.slice(0, COVER_PRIORITY_BATCH_SIZE);
-    const background = missing.slice(COVER_PRIORITY_BATCH_SIZE);
-    await hydrateCoverBatch(priority, hydrationId, true);
-    for (let index = 0; index < background.length; index += COVER_BACKGROUND_BATCH_SIZE) {
-      if (state.coverHydrationId !== hydrationId) return;
-      await waitForCoverIdle();
-      await hydrateCoverBatch(background.slice(index, index + COVER_BACKGROUND_BATCH_SIZE), hydrationId, false);
-    }
+    await loadBookMetadata(books);
+    if (state.coverHydrationId !== hydrationId) return;
+    books.forEach((book) => updateCoverElement(book.bookId, book.metadata || state.coverCache[book.bookId], false));
   }
 
-  async function hydrateCoverBatch(items, hydrationId, priority) {
-    if (!items.length || state.coverHydrationId !== hydrationId) return;
-    try {
-      const payload = await postToSheet({ action: "bookMetaBatch", items });
-      if (payload.ok && payload.items) {
-        Object.keys(payload.items).forEach((bookId) => {
-          const meta = payload.items[bookId];
-          if (!meta || (!meta.cover && !meta.description)) return;
-          state.coverCache[bookId] = meta;
-          updateCoverElement(bookId, meta, priority);
+  async function loadBookMetadata(books) {
+    if (!config.appsScriptUrl) return;
+    const missing = books.filter((book) => book && !book.metadata && !state.coverCache[book.bookId]);
+    const waiting = missing.map((book) => metadataInFlight.get(book.bookId)).filter(Boolean);
+    const fresh = missing.filter((book) => !metadataInFlight.has(book.bookId));
+    if (Date.now() >= metadataRetryAfter) {
+      for (let offset = 0; offset < fresh.length; offset += 25) {
+        const batch = fresh.slice(offset, offset + 25);
+        const items = batch.map(({ bookId, title, author, isbn13 }) => ({ bookId, title, author, isbn13 }));
+        const request = postToSheet({ action: "savedBookMetaBatch", items }).then((payload) => {
+          if (!payload.ok || !payload.items) throw new Error("저장된 도서 정보를 불러오지 못했습니다.");
+          batch.forEach((book) => { state.coverCache[book.bookId] = payload.items[book.bookId] || {}; });
+        }).catch(() => {
+          // Do not turn one failed batch into many individual requests.
+          metadataRetryAfter = Date.now() + 60000;
+        }).finally(() => {
+          batch.forEach((book) => metadataInFlight.delete(book.bookId));
         });
-        saveJson("careerBookCoverCache", state.coverCache);
-        return;
+        batch.forEach((book) => metadataInFlight.set(book.bookId, request));
+        waiting.push(request);
       }
-    } catch (error) {
-      // Older Apps Script deployments do not know bookMetaBatch yet.
     }
-
-    const fallback = items.slice(0, COVER_BACKGROUND_BATCH_SIZE);
-    for (let index = 0; index < fallback.length; index += 1) {
-      if (state.coverHydrationId !== hydrationId) return;
-      const book = findBook(fallback[index].bookId);
-      if (!book) continue;
-      const meta = await metaFromAladin(book);
-      if (meta && meta.cover) updateCoverElement(book.bookId, meta, priority);
-    }
-  }
-
-  function waitForCoverIdle() {
-    return new Promise((resolve) => {
-      if (window.requestIdleCallback) {
-        window.requestIdleCallback(resolve, { timeout: COVER_BACKGROUND_DELAY_MS * 4 });
-        return;
-      }
-      window.setTimeout(resolve, COVER_BACKGROUND_DELAY_MS);
-    });
+    await Promise.all(waiting);
   }
 
   function updateCoverElement(bookId, meta, priority) {
@@ -1164,7 +1137,7 @@
   }
 
   function saveJson(key, value) {
-    localStorage.setItem(key, JSON.stringify(value));
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (error) { /* Storage is optional; keep this session usable. */ }
   }
 
   function loadPendingIdCache() {

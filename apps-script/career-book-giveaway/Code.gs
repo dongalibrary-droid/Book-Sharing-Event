@@ -10,6 +10,11 @@ const CONFIG = {
   MAX_BOOKS_PER_REQUEST: 20,
   MAX_META_BATCH_SIZE: 25,
   META_CONCURRENCY: 6,
+  META_SHEET_NAME: "도서메타",
+  META_SYNC_BATCH_SIZE: 12,
+  META_DAILY_REQUEST_BUDGET: 4000,
+  META_SYNC_BUDGET_MS: 180000,
+  META_RETRY_MS: 86400000,
   TIME_ZONE: "Asia/Seoul",
   DATETIME_FORMAT: "yyyy-MM-dd HH:mm:ss",
 };
@@ -18,6 +23,7 @@ const BOOK_HEADERS = ["도서ID", "등록번호", "서명", "저자", "청구기
 const REQUEST_HEADERS = ["신청ID", "신청일시", "상태", "학생명", "학번", "학과", "연락처", "이메일", "신청경로", "도서ID", "등록번호", "서명", "저자", "ISBN13", "메모", "처리자", "처리일시", "수령캠퍼스"];
 const PICKUP_CAMPUSES = ["한림도서관(승학)", "부민도서관(부민)"];
 const USER_HEADERS = ["학번", "성명", "휴대폰번호", "개인정보동의", "최초로그인", "최근로그인", "로그인횟수"];
+const META_HEADERS = ["도서ID", "검색기준", "표지URL", "소개", "알라딘서명", "알라딘저자", "출판사", "출판일", "ISBN13", "알라딘URL", "수집상태", "갱신일시", "재시도시각"];
 const DEFAULT_SETTINGS = [
   ["SITE_TITLE", "동아대학교 도서관 도서 나눔", "사이트와 로그인 화면에 표시되는 기본 행사명"],
   ["SITE_EYEBROW", "Library Book Sharing", "로그인 화면 상단 보조 문구"],
@@ -48,7 +54,7 @@ function doGet(e) {
 function doPost(e) {
   try {
     const payload = parsePost_(e);
-    if (payload.action === "bookMetaBatch") return json_({ ok: true, items: getBookMetaBatch_(payload) });
+    if (payload.action === "bookMetaBatch" || payload.action === "savedBookMetaBatch") return json_({ ok: true, items: getBookMetaBatch_(payload) });
     if (payload.action === "login") return json_(loginUser_(payload));
     if (payload.action === "submitApplication") return json_(submitApplication_(payload));
     if (payload.action === "cancelApplication") return json_(cancelApplication_(payload));
@@ -60,7 +66,7 @@ function doPost(e) {
 
 function setupCareerBookGiveawaySheets() {
   ensureSheets_();
-  SpreadsheetApp.getUi().alert("도서목록, 신청현황, 이용자, 설정 시트를 확인했습니다.");
+  SpreadsheetApp.getUi().alert("도서목록, 신청현황, 이용자, 설정, 도서메타 시트를 확인했습니다.");
 }
 
 function setAladinTtbKey() {
@@ -288,23 +294,27 @@ function readPendingRequests_(forceRefresh) {
 }
 
 function getBookMeta_(params) {
-  const key = getAladinKey_();
-  if (!key) return { description: "", cover: "", message: "ALADIN_TTB_KEY가 설정되지 않았습니다." };
-  const isbn13 = String(params.isbn13 || "").replace(/[^0-9Xx]/g, "");
-  const title = String(params.title || "").trim();
-  const author = String(params.author || "").trim();
-  const cacheKey = "aladinMeta:" + (isbn13 || Utilities.base64EncodeWebSafe(title + "|" + author).slice(0, 80));
-  const cache = CacheService.getScriptCache();
-  const cached = cache.get(cacheKey);
-  if (cached) return JSON.parse(cached);
-  let item = isbn13 ? aladinLookupByIsbn_(key, isbn13) : null;
-  if (!item && title) item = aladinSearchByTitle_(key, title, author);
-  const normalized = normalizeAladinItem_(item);
-  cache.put(cacheKey, JSON.stringify(normalized), CONFIG.META_CACHE_SECONDS);
-  return normalized;
+  return getBookMetaBatch_({ items: [params] })[String(params.bookId || "").trim()] || normalizeAladinItem_(null);
 }
 
 function getBookMetaBatch_(params) {
+  const items = parseMetaItems_(params.items).filter(Boolean).slice(0, CONFIG.MAX_META_BATCH_SIZE);
+  const result = {};
+  // Public requests only read persisted metadata. Missing data never calls Aladin.
+  const table = readMetadataTable_();
+  items.forEach(function (item) {
+    const id = String(item.bookId || "").trim();
+    if (!id) return;
+    const record = table.records[id];
+    result[id] = record && (!item.title || record.sourceKey === metadataSourceKey_(item))
+      ? record.item : normalizeAladinItem_(null);
+  });
+  return result;
+}
+
+// Only the administrator's batch collector calls the external API.
+function fetchAladinMetaBatch_(params) {
+  const deadline = params.deadline || Date.now() + CONFIG.META_SYNC_BUDGET_MS;
   const items = parseMetaItems_(params.items);
   const result = {};
   const key = getAladinKey_();
@@ -316,47 +326,262 @@ function getBookMetaBatch_(params) {
     const isbn = String(item.isbn13 || "").replace(/[^0-9Xx]/g, "");
     const title = String(item.title || "").trim();
     const author = String(item.author || "").trim();
-    const cacheKey = "aladinMeta:" + (isbn || Utilities.base64EncodeWebSafe(title + "|" + author).slice(0, 80));
+    const cacheKey = "aladinStoredV1:" + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, metadataSourceKey_(item)));
     const cached = readCacheJson_(cacheKey);
-    result[bookId] = cached || normalizeAladinItem_(null);
+    result[bookId] = cached || Object.assign(normalizeAladinItem_(null), { collectionStatus: "대기" });
     if (cached || !key) return;
     const urls = [];
     if (isbn) urls.push(CONFIG.ALADIN_API_BASE + "ItemLookUp.aspx?" + toQuery_({ ttbkey: key, itemIdType: "ISBN13", ItemId: isbn, output: "js", Version: CONFIG.ALADIN_VERSION, Cover: "Big" }));
     if (title) buildAladinQueries_(title, author).forEach(function (query) {
       urls.push(CONFIG.ALADIN_API_BASE + "ItemSearch.aspx?" + toQuery_({ ttbkey: key, Query: query.query, QueryType: query.type, SearchTarget: "Book", MaxResults: 1, start: 1, output: "js", Version: CONFIG.ALADIN_VERSION, Cover: "Big" }));
     });
+    if (!urls.length) result[bookId].collectionStatus = "미검색";
     jobs.push({ bookId: bookId, cacheKey: cacheKey, urls: urls, next: 0, done: false });
   });
   // Preserve search priority within each book, fetch different books together.
-  while (true) {
+  while (Date.now() < deadline) {
     const pending = jobs.filter(function (job) { return !job.done && job.next < job.urls.length; });
     if (!pending.length) break;
     for (let offset = 0; offset < pending.length; offset += CONFIG.META_CONCURRENCY) {
+      if (Date.now() >= deadline) break;
       const batch = pending.slice(offset, offset + CONFIG.META_CONCURRENCY);
+      // Count actual outgoing requests, including failures; cache hits cost nothing.
+      if (params.reserveBudget && !reserveMetadataBudget_(batch.length)) {
+        params.budgetExhausted = true;
+        return result;
+      }
       let responses;
       try {
         responses = UrlFetchApp.fetchAll(batch.map(function (job) { return { url: job.urls[job.next++], muteHttpExceptions: true }; }));
       } catch (error) {
-        batch.forEach(function (job) { job.done = true; });
+        batch.forEach(function (job) { job.done = true; result[job.bookId].collectionStatus = "오류"; });
         continue;
       }
       batch.forEach(function (job, index) {
         try {
           const response = responses[index];
-          if (response.getResponseCode() >= 400) { job.done = true; return; }
+          if (response.getResponseCode() >= 400) { job.done = true; result[job.bookId].collectionStatus = "오류"; return; }
           const data = JSON.parse(response.getContentText());
-          if (data.errorCode) { job.done = true; return; }
+          if (data.errorCode) { job.done = true; result[job.bookId].collectionStatus = "오류"; return; }
           const found = data.item && data.item[0];
           if (found) {
             result[job.bookId] = normalizeAladinItem_(found);
             job.done = true;
           }
-          if (found || job.next === job.urls.length) writeCacheJson_(job.cacheKey, result[job.bookId], CONFIG.META_CACHE_SECONDS);
-        } catch (error) { job.done = true; }
+          if (found || job.next === job.urls.length) {
+            result[job.bookId].collectionStatus = found ? "완료" : "미검색";
+            writeCacheJson_(job.cacheKey, result[job.bookId], CONFIG.META_CACHE_SECONDS);
+          }
+        } catch (error) { job.done = true; result[job.bookId].collectionStatus = "오류"; }
       });
     }
   }
   return result;
+}
+
+function metadataSourceKey_(book) {
+  return JSON.stringify([String(book.isbn13 || "").replace(/[^0-9Xx]/g, ""), String(book.title || "").trim(), String(book.author || "").trim()]);
+}
+
+function readMetadataTable_() {
+  const sheet = getSpreadsheet_().getSheetByName(CONFIG.META_SHEET_NAME);
+  const records = Object.create(null);
+  if (!sheet || sheet.getLastRow() === 0) return { sheet: sheet, records: records };
+  const rows = sheet.getRange(1, 1, sheet.getLastRow(), META_HEADERS.length).getDisplayValues();
+  if (META_HEADERS.some(function (header, i) { return rows[0][i] !== header; })) {
+    throw new Error("도서메타 시트의 열 제목과 순서를 확인해주세요.");
+  }
+  rows.slice(1).forEach(function (row, index) {
+    if (!row[0]) return;
+    records[row[0]] = {
+      row: index + 2, sourceKey: row[1], retryAt: Number(row[12]) || 0,
+      item: { cover: row[2], description: row[3], title: row[4], author: row[5], publisher: row[6], pubDate: row[7], isbn13: row[8], link: row[9], collectionStatus: row[10], updatedAt: row[11] }
+    };
+  });
+  return { sheet: sheet, records: records };
+}
+
+// Run manually, or install the optional ten-minute trigger below. No web action exposes this.
+function syncBookMetadata() {
+  // Separate from the script lock used by student applications.
+  const lock = LockService.getUserLock();
+  if (!lock.tryLock(1000)) return;
+  try {
+    return syncBookMetadataBatch_(Date.now() + CONFIG.META_SYNC_BUDGET_MS);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function syncBookMetadataBatch_(deadline, snapshot) {
+  if (!getAladinKey_()) throw new Error("ALADIN_TTB_KEY를 먼저 설정해주세요.");
+  if (!snapshot) {
+    ensureSheet_(getSpreadsheet_(), CONFIG.META_SHEET_NAME, META_HEADERS);
+    snapshot = { table: readMetadataTable_(), books: readBooks_() };
+  }
+  const table = snapshot.table;
+  const books = snapshot.books;
+  const reusable = Object.create(null);
+  Object.keys(table.records).forEach(function (id) {
+    const record = table.records[id];
+    if (["완료", "미검색"].indexOf(record.item.collectionStatus) !== -1) reusable[record.sourceKey] = record.item;
+  });
+  const now = Date.now();
+  const candidates = books.filter(function (book) {
+    const record = table.records[book.bookId];
+    if (!record || record.sourceKey !== metadataSourceKey_(book)) return true;
+    return !record.item.collectionStatus || (record.item.collectionStatus === "오류" && record.retryAt <= now);
+  }).slice(0, CONFIG.META_SYNC_BATCH_SIZE);
+  const jobs = [];
+  const seen = Object.create(null);
+  candidates.forEach(function (book) {
+    const key = metadataSourceKey_(book);
+    if (!reusable[key] && !seen[key]) { seen[key] = book.bookId; jobs.push(book); }
+  });
+  const fetchOptions = { items: jobs, deadline: deadline, reserveBudget: true };
+  const fetched = jobs.length ? fetchAladinMetaBatch_(fetchOptions) : {};
+  const appended = [];
+  let processed = 0;
+  const appendStart = table.sheet.getLastRow() + 1;
+  candidates.forEach(function (book) {
+    const key = metadataSourceKey_(book);
+    const item = reusable[key] || fetched[seen[key]];
+    const status = item.collectionStatus || "오류";
+    // Budget/time limits are not API failures. Leave these books eligible for continuation.
+    if (status === "대기") return;
+    processed += 1;
+    const row = [book.bookId, key, item.cover, item.description, item.title, item.author, item.publisher, item.pubDate, item.isbn13, item.link, status, nowKst_(), status === "오류" ? now + CONFIG.META_RETRY_MS : ""]
+      .map(function (value) { return typeof value === "string" && value.charAt(0) === "=" ? "'" + value : value; });
+    const previous = table.records[book.bookId];
+    if (previous) table.sheet.getRange(previous.row, 1, 1, META_HEADERS.length).setValues([row]);
+    else appended.push(row);
+    table.records[book.bookId] = {
+      row: previous ? previous.row : appendStart + appended.length - 1,
+      sourceKey: key, item: item, retryAt: status === "오류" ? now + CONFIG.META_RETRY_MS : 0
+    };
+  });
+  if (appended.length) {
+    const requiredRows = table.sheet.getLastRow() + appended.length;
+    if (requiredRows > table.sheet.getMaxRows()) table.sheet.insertRowsAfter(table.sheet.getMaxRows(), requiredRows - table.sheet.getMaxRows());
+    table.sheet.getRange(table.sheet.getLastRow() + 1, 1, appended.length, META_HEADERS.length).setValues(appended);
+  }
+  SpreadsheetApp.flush();
+  console.log("도서메타 " + processed + "권 처리. 완료/미검색은 재수집하지 않으며 오류는 24시간 뒤 재시도합니다.");
+  return { processed: processed, budgetExhausted: Boolean(fetchOptions.budgetExhausted) };
+}
+
+// One click starts the whole catalog. A one-shot trigger resumes unfinished work.
+function syncAllBookMetadata() {
+  if (!getAladinKey_()) throw new Error("ALADIN_TTB_KEY를 먼저 설정해주세요.");
+  removeBookMetadataTrigger();
+  PropertiesService.getScriptProperties().setProperty("METADATA_SYNC_ALL", "1");
+  scheduleMetadataContinuation_(60000);
+  return continueBookMetadataSync();
+}
+
+function continueBookMetadataSync() {
+  const properties = PropertiesService.getScriptProperties();
+  if (properties.getProperty("METADATA_SYNC_ALL") !== "1") return;
+  const lock = LockService.getUserLock();
+  if (!lock.tryLock(1000)) return;
+  try {
+    if (properties.getProperty("METADATA_SYNC_ALL") !== "1") return;
+    // Schedule recovery before work: a platform timeout cannot lose the continuation.
+    scheduleMetadataContinuation_(10 * 60000);
+    const deadline = Date.now() + CONFIG.META_SYNC_BUDGET_MS;
+    ensureSheet_(getSpreadsheet_(), CONFIG.META_SHEET_NAME, META_HEADERS);
+    const snapshot = { table: readMetadataTable_(), books: readBooks_() };
+    let processed = 0;
+    let result = {};
+    while (Date.now() < deadline && properties.getProperty("METADATA_SYNC_ALL") === "1") {
+      result = syncBookMetadataBatch_(deadline, snapshot);
+      processed += result.processed;
+      if (!result.processed || result.budgetExhausted) break;
+    }
+    if (properties.getProperty("METADATA_SYNC_ALL") !== "1") return { processed: processed, stopped: true };
+    const remaining = snapshot.books.filter(function (book) {
+      const record = snapshot.table.records[book.bookId];
+      return !record || record.sourceKey !== metadataSourceKey_(book) || ["완료", "미검색"].indexOf(record.item.collectionStatus) === -1;
+    });
+    if (!remaining.length) {
+      stopAllBookMetadataSync();
+      console.log("전체 도서메타 수집 완료: " + snapshot.books.length + "권. exportBookMetadata로 내보낼 수 있습니다.");
+      return { processed: processed, remaining: 0 };
+    }
+    let delay = 60000;
+    if (result.budgetExhausted) {
+      const day = Utilities.formatDate(new Date(), CONFIG.TIME_ZONE, "yyyy-MM-dd");
+      delay = Math.max(60000, Date.parse(day + "T00:05:00+09:00") + 86400000 - Date.now());
+    } else if (!result.processed) {
+      // Only failures awaiting their cooldown remain; don't poll every minute.
+      const nextRetry = Math.min.apply(null, remaining.map(function (book) {
+        const record = snapshot.table.records[book.bookId];
+        return record ? record.retryAt : 0;
+      }));
+      delay = Math.max(60000, nextRetry - Date.now());
+    }
+    scheduleMetadataContinuation_(delay);
+    console.log("이번 실행 " + processed + "권 처리, 남은 " + remaining.length + "권은 자동으로 이어서 수집합니다.");
+    return { processed: processed, remaining: remaining.length };
+  } catch (error) {
+    // Preserve the flag, but back off on sheet/service errors.
+    if (properties.getProperty("METADATA_SYNC_ALL") === "1") scheduleMetadataContinuation_(60 * 60000);
+    throw error;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function scheduleMetadataContinuation_(delay) {
+  clearMetadataContinuation_();
+  ScriptApp.newTrigger("continueBookMetadataSync").timeBased().after(delay).create();
+}
+
+function clearMetadataContinuation_() {
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === "continueBookMetadataSync") ScriptApp.deleteTrigger(trigger);
+  });
+}
+
+function stopAllBookMetadataSync() {
+  PropertiesService.getScriptProperties().deleteProperty("METADATA_SYNC_ALL");
+  clearMetadataContinuation_();
+}
+
+function reserveMetadataBudget_(count) {
+  const properties = PropertiesService.getScriptProperties();
+  const day = Utilities.formatDate(new Date(), CONFIG.TIME_ZONE, "yyyy-MM-dd");
+  const saved = JSON.parse(properties.getProperty("METADATA_DAILY_BUDGET") || "{}");
+  const used = saved.day === day ? Number(saved.used || 0) : 0;
+  if (used + count > CONFIG.META_DAILY_REQUEST_BUDGET) return false;
+  properties.setProperty("METADATA_DAILY_BUDGET", JSON.stringify({ day: day, used: used + count }));
+  return true;
+}
+
+function installBookMetadataTrigger() {
+  if (ScriptApp.getProjectTriggers().some(function (trigger) { return trigger.getHandlerFunction() === "syncBookMetadata"; })) return;
+  ScriptApp.newTrigger("syncBookMetadata").timeBased().everyMinutes(10).create();
+}
+
+function removeBookMetadataTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === "syncBookMetadata") ScriptApp.deleteTrigger(trigger);
+  });
+}
+
+// Private Drive file: only book metadata, never applicants, settings or API keys.
+function exportBookMetadata() {
+  const table = readMetadataTable_();
+  const items = Object.create(null);
+  readBooks_().forEach(function (book) {
+    const record = table.records[book.bookId];
+    if (record && record.sourceKey === metadataSourceKey_(book) && ["완료", "미검색"].indexOf(record.item.collectionStatus) !== -1) {
+      items[book.bookId] = Object.assign({ sourceKey: record.sourceKey }, record.item);
+    }
+  });
+  const file = DriveApp.createFile("book-metadata.json", JSON.stringify({ generatedAt: nowKst_(), items: items }), "application/json");
+  console.log("다운로드 후 사이트에 반영: " + file.getUrl());
+  return file.getUrl();
 }
 
 function readCacheJson_(key) {
@@ -518,6 +743,7 @@ function ensureSheets_() {
   ensureSheet_(ss, CONFIG.USER_SHEET_NAME, USER_HEADERS);
   const settingsSheet = ensureSheet_(ss, CONFIG.SETTINGS_SHEET_NAME, ["설정항목", "값", "비고"]);
   ensureDefaultSettings_(settingsSheet);
+  ensureSheet_(ss, CONFIG.META_SHEET_NAME, META_HEADERS);
 }
 
 function ensurePickupCampusColumn_(sheet) {

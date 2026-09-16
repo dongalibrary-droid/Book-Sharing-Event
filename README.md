@@ -30,6 +30,8 @@ python scripts/build-career-books.py
 
 ## 운영 문구
 
+표지·소개는 관리자용 `syncAllBookMetadata`를 한 번 실행해 전체 도서를 `도서메타` 시트에 미리 저장합니다. 시간/호출 한도에 도달하면 자동으로 이어서 처리하며, 중지는 `stopAllBookMetadataSync`로 합니다. `exportBookMetadata`로 내보낸 JSON을 `node scripts/import-book-metadata.cjs "book-metadata.json"`으로 가져와 배포하면 해당 도서는 Apps Script 표지 조회도 생략합니다. 목록 재생성 후에는 메타데이터를 다시 가져와야 합니다. [수집·자동 실행·배포 절차](docs/setup.md)를 참고하세요. 검증은 `npm test`로 실행합니다.
+
 Apps Script의 `setupCareerBookGiveawaySheets`를 실행하면 구글시트 `설정` 시트에 사이트 문구 항목이 자동으로 준비됩니다.
 
 - `SITE_TITLE`: 로그인 화면과 브라우저 제목에 표시되는 행사명
