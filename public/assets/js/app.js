@@ -8,6 +8,10 @@
   let metadataRetryAfter = 0;
   const PENDING_CACHE_KEY = "careerBookPendingIds";
   const PENDING_CACHE_MAX_AGE_MS = 120000;
+  const initialPendingCache = loadPendingCache();
+  let pendingRequest = null;
+  let pendingRetryTimer = null;
+  let pendingRevision = 0;
   const settingsStartedAt = Date.now();
   const siteDefaults = {
     SITE_TITLE: "도서 나눔 플랫폼",
@@ -29,7 +33,12 @@
   const state = {
     books: [],
     filtered: [],
-    pendingIds: loadPendingIdCache(),
+    pendingIds: new Set(initialPendingCache ? initialPendingCache.ids : []),
+    pendingLoaded: Boolean(initialPendingCache),
+    pendingUpdatedAt: initialPendingCache ? initialPendingCache.savedAt : 0,
+    pendingLoading: false,
+    pendingError: false,
+    catalogReady: false,
     category: "전체",
     view: "list",
     page: 1,
@@ -61,7 +70,13 @@
     renderAuth();
     bindCommon();
     applySiteSettings();
-    loadSiteSettings();
+    if (pageName === "catalog" || pageName === "detail") {
+      // Start availability before catalog, settings and cover requests.
+      refreshPending(false).then(() => loadSiteSettings());
+      startPendingRefresh();
+    } else {
+      loadSiteSettings();
+    }
 
     if (pageName === "login") {
       if (state.user) {
@@ -75,12 +90,12 @@
     if (pageName === "catalog") {
       await withLoading("도서 목록을 불러오는 중입니다.", async () => {
         await loadBooks();
+        state.catalogReady = true;
         updateCart();
         bindCatalog();
         renderCategories();
         filterBooks();
       });
-      refreshPending(false, { silent: true });
       return;
     }
 
@@ -88,10 +103,8 @@
       bindDetailPage();
       await withLoading("도서 정보를 불러오는 중입니다.", async () => {
         await loadBooks();
+        state.catalogReady = true;
         updateCart();
-        renderDetailPage();
-      });
-      refreshPending(false).then(() => {
         renderDetailPage();
       });
       return;
@@ -228,7 +241,7 @@
       "bulkCancelSelected", "pageDetailCover", "pageDetailCategory",
       "pageDetailTitle", "pageDetailAuthor", "pageDetailMeta", "pageDetailDescription",
       "pageDetailApply", "pageDetailCart", "pageRegistrationNo", "pageCallNo",
-      "pageLocation", "pageCatalogLink"
+      "pageLocation", "pageCatalogLink", "pendingStatus"
     ].forEach((id) => {
       els[id] = $(id);
     });
@@ -381,6 +394,7 @@
   }
 
   function bindDetailPage() {
+    if (els.refreshLive) els.refreshLive.addEventListener("click", () => refreshPending(true));
     if (els.pageDetailApply) els.pageDetailApply.addEventListener("click", () => state.activeBook && openApply([state.activeBook], "detail"));
     if (els.pageDetailCart) els.pageDetailCart.addEventListener("click", () => state.activeBook && addCart(state.activeBook.bookId));
   }
@@ -447,30 +461,94 @@
     updateSummaryCounts();
   }
 
-  async function refreshPending(manual, options = {}) {
-    const forceRefresh = Boolean(manual || options.force);
-    const silent = Boolean(options.silent);
-    const shouldRender = options.render !== false;
-    if (!config.appsScriptUrl) {
-      if (manual && !silent) toast("신청 상태를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.");
-      return;
+  function refreshPending(manual, options = {}) {
+    if (pendingRequest) {
+      // A mutation requires a read started after the write, not an older in-flight read.
+      if (options.force) return pendingRequest.then(() => refreshPending(manual, { ...options, force: false }));
+      return pendingRequest;
     }
-    try {
-      const payload = await getFromSheet({ action: "pending", refresh: forceRefresh ? "1" : "" });
-      if (!payload.ok || !Array.isArray(payload.entries)) throw new Error(payload.message || "신청 상태를 불러오지 못했습니다.");
-      const entries = payload.entries || [];
-      state.pendingIds = buildPendingKeySet(entries);
-      savePendingIdCache(state.pendingIds);
-      if (shouldRender) {
-        updateSummaryCounts();
-        if (pageName === "catalog") filterBooks();
-        if (pageName === "detail") updateActiveBookActions();
-        updateCart();
+    clearTimeout(pendingRetryTimer);
+    state.pendingLoading = true;
+    state.pendingError = false;
+    renderPendingInfo();
+    const revision = pendingRevision;
+    pendingRequest = Promise.resolve().then(async () => {
+      try {
+        if (!config.appsScriptUrl) throw new Error("신청 상태 연결이 설정되지 않았습니다.");
+        // The browser already holds a short-lived cache; fetch current state from Sheets.
+        const payload = await getFromSheet({ action: "pending", refresh: "1" });
+        if (!payload.ok || !Array.isArray(payload.entries)) throw new Error(payload.message || "신청 상태를 불러오지 못했습니다.");
+        if (revision !== pendingRevision) return false;
+        state.pendingIds = buildPendingKeySet(payload.entries);
+        state.pendingLoaded = true;
+        state.pendingUpdatedAt = Date.now();
+        savePendingIdCache(state.pendingIds);
+        if (manual && !options.silent) toast("신청 상태를 새로 확인했습니다.");
+        return true;
+      } catch (error) {
+        state.pendingError = true;
+        const attempt = Number(options.attempt || 0);
+        if (config.appsScriptUrl && attempt < 2) {
+          pendingRetryTimer = setTimeout(() => {
+            if (!document.hidden) refreshPending(false, { attempt: attempt + 1 });
+          }, (attempt + 1) * 5000);
+        }
+        if (manual && !options.silent) toast("신청 상태를 불러오지 못했습니다. 자동으로 다시 확인합니다.");
+        return false;
+      } finally {
+        pendingRequest = null;
+        state.pendingLoading = false;
+        renderAvailability();
       }
-      if (manual && !silent) toast("신청 상태를 새로 확인했습니다.");
-    } catch (error) {
-      if (manual && !silent) toast("신청 상태를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.");
+    });
+    return pendingRequest;
+  }
+
+  function startPendingRefresh() {
+    const refreshIfStale = () => {
+      if (!document.hidden && Date.now() - state.pendingUpdatedAt >= 60000) refreshPending(false);
+    };
+    window.setInterval(() => {
+      if (!document.hidden) refreshPending(false);
+    }, 60000);
+    document.addEventListener("visibilitychange", refreshIfStale);
+    window.addEventListener("online", () => refreshPending(false));
+  }
+
+  function renderPendingInfo() {
+    if (els.pendingStatus) {
+      els.pendingStatus.textContent = state.pendingLoading
+        ? (state.pendingLoaded ? "최근 확인 결과를 표시하고 있습니다. 최신 신청상태를 확인 중입니다." : "신청가능 권수와 도서별 상태를 확인 중입니다.")
+        : state.pendingError
+          ? (state.pendingLoaded ? "최근 확인 결과입니다. 최신 상태 확인에 실패했습니다. 잠시 후 다시 확인하거나 신청상태 새로고침을 눌러주세요." : "신청상태를 확인하지 못했습니다. 잠시 후 다시 확인하거나 신청상태 새로고침을 눌러주세요.")
+          : state.pendingLoaded ? "신청상태를 확인했습니다. 화면을 열어두면 1분마다 갱신합니다." : "신청가능 권수와 도서별 상태를 확인 중입니다.";
     }
+    if (els.refreshLive) {
+      els.refreshLive.disabled = state.pendingLoading;
+      els.refreshLive.textContent = state.pendingLoading ? "신청상태 확인 중…" : "신청상태 새로고침";
+    }
+    [els.availableOnly, els.hidePending].filter(Boolean).forEach((input) => { input.disabled = !state.pendingLoaded; });
+  }
+
+  function renderAvailability() {
+    renderPendingInfo();
+    updateSummaryCounts();
+    if (pageName === "catalog" && state.catalogReady) filterBooks();
+    updateActiveBookActions();
+    updateCart();
+  }
+
+  function applyPendingChange(books, active) {
+    pendingRevision += 1;
+    books.filter(Boolean).forEach((book) => {
+      [book.bookId, book.registrationNo].map(normalizePendingKey).filter(Boolean).forEach((key) => {
+        if (active) state.pendingIds.add(key);
+        else state.pendingIds.delete(key);
+      });
+    });
+    // A partial mutation must not pretend we have fetched the entire pending list.
+    if (state.pendingLoaded) savePendingIdCache(state.pendingIds);
+    renderAvailability();
   }
 
   function renderCategories() {
@@ -498,7 +576,7 @@
     state.filtered = state.books.filter((book) => {
       if (state.category !== "전체" && book.category !== state.category) return false;
       if (query && !book.searchText.includes(query)) return false;
-      if (els.availableOnly.checked && !canApplyBook(book)) return false;
+      if (state.pendingLoaded && els.availableOnly.checked && !canApplyBook(book)) return false;
       if (els.hidePending.checked && hasPendingBook(book)) return false;
       return true;
     });
@@ -529,11 +607,11 @@
   function renderBookCard(book, index) {
     const pending = hasPendingBook(book);
     const canApply = canApplyBook(book);
-    const status = pending ? "신청 진행중" : book.status || "신청가능";
+    const status = pending ? "신청 진행중" : !available(book) ? "신청 마감" : !state.pendingLoaded ? (state.pendingError ? "상태 확인 필요" : "상태 확인 중") : book.status || "신청가능";
     return `<article class="book-card">
       ${cover(book, index < PRIORITY_COVER_COUNT)}
       <div>
-        <span class="status${canApply ? "" : " closed"}">${html(status)}</span>
+      <span class="status${!state.pendingLoaded && !pending && available(book) ? " confirmed" : canApply ? "" : " closed"}">${html(status)}</span>
         <h3 class="book-title">${html(book.title)}</h3>
         <p class="book-sub">${html(book.author || "저자 정보 없음")} · ${html(book.publicationYear || "연도 미상")}</p>
         <div class="book-meta">
@@ -648,6 +726,7 @@
   }
 
   function addCart(bookId) {
+    if (!state.pendingLoaded) return toast("신청상태를 확인한 뒤 장바구니에 담을 수 있습니다.");
     const book = findBook(bookId);
     if (!book || hasPendingBook(book) || !available(book)) return toast("이미 신청 진행중이거나 마감된 도서입니다.");
     if (!state.cart.includes(bookId)) {
@@ -683,10 +762,11 @@
       saveJson("careerBookCart", state.cart);
       updateCart();
     }));
-    els.applyCart.disabled = books.length === 0;
+    els.applyCart.disabled = !state.pendingLoaded || !books.some(canApplyBook);
   }
 
   function openApply(books, source) {
+    if (!state.pendingLoaded) return toast("신청상태를 확인 중입니다. 잠시 후 다시 시도해주세요.");
     if (!state.user) {
       toast("로그인 후 신청할 수 있습니다.");
       setTimeout(() => location.href = "index.html", 700);
@@ -735,13 +815,14 @@
     try {
       const result = await postToSheet(payload);
       if (!result.ok) throw new Error(appErrorMessage(result.message || "신청 접수 실패"));
+      applyPendingChange(state.selectedBooks, true);
       state.cart = state.cart.filter((id) => !state.selectedBooks.some((book) => book.bookId === id));
       saveJson("careerBookCart", state.cart);
       updateCart();
       closeAll();
       els.applyForm.reset();
       toast("신청이 접수되었습니다.");
-      await refreshPending(false);
+      refreshPending(false, { force: true });
     } catch (error) {
       const message = appErrorMessage(error.message || "신청 접수 중 오류가 발생했습니다.");
       toast(message);
@@ -846,6 +927,8 @@
         phone: state.user.phone,
       });
       if (!result.ok) throw new Error(appErrorMessage(result.message || "신청을 취소하지 못했습니다."));
+      applyPendingChange([state.myRequests.find((entry) => entry.requestId === requestId)], false);
+      refreshPending(false, { force: true });
       toast("신청이 취소되었습니다.");
       await loadMyRequests(false);
     } catch (error) {
@@ -878,6 +961,7 @@
           phone: state.user.phone,
         });
         if (!result.ok) throw new Error(appErrorMessage(result.message || "선택 신청을 취소하지 못했습니다."));
+        applyPendingChange([selected[index]], false);
         successCount += 1;
       }
       state.selectedRequestIds = new Set();
@@ -893,6 +977,7 @@
         setButtonLoading(els.bulkCancelSelected, "선택 신청 취소");
       }
       updateBulkActions();
+      if (successCount) refreshPending(false, { force: true });
     }
   }
 
@@ -985,8 +1070,10 @@
   function updateDetailActionButtons(book, applyButton, cartButton) {
     const canApply = canApplyBook(book);
     const pending = hasPendingBook(book);
-    const applyLabel = pending ? "신청 진행중" : available(book) ? "바로 신청" : "신청 마감";
-    const cartLabel = pending ? "신청 진행중" : available(book) ? "장바구니 담기" : "신청 마감";
+    const unknown = !state.pendingLoaded && available(book) && !pending;
+    const unknownLabel = state.pendingError ? "신청상태 확인 필요" : "신청상태 확인 중";
+    const applyLabel = unknown ? unknownLabel : pending ? "신청 진행중" : available(book) ? "바로 신청" : "신청 마감";
+    const cartLabel = unknown ? unknownLabel : pending ? "신청 진행중" : available(book) ? "장바구니 담기" : "신청 마감";
     if (applyButton) {
       applyButton.disabled = !canApply;
       applyButton.textContent = applyLabel;
@@ -1011,7 +1098,10 @@
 
   function updateSummaryCounts() {
     if (els.totalBooks) els.totalBooks.textContent = fmt(state.books.length);
-    if (els.availableBooks) els.availableBooks.textContent = fmt(state.books.filter(canApplyBook).length);
+    if (els.availableBooks) {
+      els.availableBooks.textContent = state.pendingLoaded ? fmt(state.books.filter(canApplyBook).length) : "-";
+      els.availableBooks.title = state.pendingLoaded ? "최근 확인한 신청가능 권수" : "신청상태를 확인하면 표시됩니다.";
+    }
   }
 
   async function hydrateVisibleCovers(books) {
@@ -1023,6 +1113,8 @@
 
   async function loadBookMetadata(books) {
     if (!config.appsScriptUrl) return;
+    // Give the initial status request priority over optional cover/description reads.
+    if (pendingRequest) await pendingRequest;
     const missing = books.filter((book) => book && !book.metadata && !state.coverCache[book.bookId]);
     const waiting = missing.map((book) => metadataInFlight.get(book.bookId)).filter(Boolean);
     const fresh = missing.filter((book) => !metadataInFlight.has(book.bookId));
@@ -1077,7 +1169,7 @@
   }
 
   function canApplyBook(book) {
-    return available(book) && !hasPendingBook(book);
+    return state.pendingLoaded && available(book) && !hasPendingBook(book);
   }
 
   async function openCart() {
@@ -1141,16 +1233,17 @@
     try { localStorage.setItem(key, JSON.stringify(value)); } catch (error) { /* Storage is optional; keep this session usable. */ }
   }
 
-  function loadPendingIdCache() {
+  function loadPendingCache() {
     const cached = loadJson(PENDING_CACHE_KEY, null);
-    if (!cached || !Array.isArray(cached.ids)) return new Set();
-    if (Date.now() - Number(cached.savedAt || 0) > PENDING_CACHE_MAX_AGE_MS) return new Set();
-    return new Set(cached.ids.map(normalizePendingKey).filter(Boolean));
+    if (!cached || !Array.isArray(cached.ids)) return null;
+    const age = Date.now() - Number(cached.savedAt || 0);
+    if (age < 0 || age > PENDING_CACHE_MAX_AGE_MS) return null;
+    return { ids: cached.ids.map(normalizePendingKey).filter(Boolean), savedAt: Number(cached.savedAt) };
   }
 
   function savePendingIdCache(pendingIds) {
     saveJson(PENDING_CACHE_KEY, {
-      savedAt: Date.now(),
+      savedAt: state.pendingUpdatedAt,
       ids: Array.from(pendingIds || []).map(normalizePendingKey).filter(Boolean),
     });
   }

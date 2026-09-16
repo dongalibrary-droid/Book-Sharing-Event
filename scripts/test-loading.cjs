@@ -15,7 +15,7 @@ const source = fs.readFileSync('public/assets/js/app.js', 'utf8').replace(/\}\)\
   };
 })();`);
 const context = vm.createContext({
-  window: { CAREER_BOOKS_CONFIG: { appsScriptUrl: 'https://example.org/exec' } },
+  window: { CAREER_BOOKS_CONFIG: { appsScriptUrl: 'https://example.org/exec' }, setInterval() {}, addEventListener() {} },
   document: { body: {dataset: {page:'catalog'}}, addEventListener() {} },
   localStorage: { getItem: () => null, setItem() { throw new Error('Storage full'); } },
   setTimeout, clearTimeout, AbortController, URL, URLSearchParams, console,
