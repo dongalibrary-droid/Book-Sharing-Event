@@ -49,9 +49,12 @@ const respond = (call, entries) => call.resolve({ok:true, json:async()=>({ok:tru
   assert.match(f.api.els.bookResults.innerHTML, /신청 진행중/);
   assert.equal(f.api.canApplyBook(f.api.state.books[1]), true);
   assert.equal(f.api.els.refreshLive.disabled, false);
+  assert.equal(f.api.els.pendingStatus.hidden, true, 'routine success notice is hidden');
+  assert.equal(f.api.els.pendingStatus.textContent, '');
 
   // A late read must not undo an application that succeeded during the read.
   const older = f.api.refreshPending(false);
+  assert.equal(f.api.els.pendingStatus.hidden, true, 'routine background refresh stays quiet');
   await tick();
   f.api.applyPendingChange([f.api.state.books[1]], true);
   assert.equal(f.api.els.availableBooks.textContent, '1');
@@ -72,6 +75,7 @@ const respond = (call, entries) => call.resolve({ok:true, json:async()=>({ok:tru
   await failed;
   assert.equal(f.api.els.availableBooks.textContent, '2');
   assert.match(f.api.els.pendingStatus.textContent, /최근 확인 결과/);
+  assert.equal(f.api.els.pendingStatus.hidden, false, 'failed reads remain visible');
   let retry = [...f.timers.values()].find(t=>t.ms===5000);
   assert.ok(retry);
   retry.callback(); await tick();

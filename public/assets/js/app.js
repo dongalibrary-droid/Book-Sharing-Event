@@ -4,6 +4,8 @@
   const PRIORITY_COVER_COUNT = 6;
   const READ_TIMEOUT_MS = 15000;
   const WRITE_TIMEOUT_MS = 30000;
+  const CANCEL_TIMEOUT_MS = 15000;
+  let myRequestsRevision = 0;
   const metadataInFlight = new Map();
   let metadataRetryAfter = 0;
   const PENDING_CACHE_KEY = "careerBookPendingIds";
@@ -46,6 +48,7 @@
     selectedBooks: [],
     activeBook: null,
     myRequests: [],
+    cancelling: false,
     selectedRequestIds: new Set(),
     coverHydrationId: 0,
     siteSettings: { ...siteDefaults },
@@ -521,7 +524,9 @@
         ? (state.pendingLoaded ? "최근 확인 결과를 표시하고 있습니다. 최신 신청상태를 확인 중입니다." : "신청가능 권수와 도서별 상태를 확인 중입니다.")
         : state.pendingError
           ? (state.pendingLoaded ? "최근 확인 결과입니다. 최신 상태 확인에 실패했습니다. 잠시 후 다시 확인하거나 신청상태 새로고침을 눌러주세요." : "신청상태를 확인하지 못했습니다. 잠시 후 다시 확인하거나 신청상태 새로고침을 눌러주세요.")
-          : state.pendingLoaded ? "신청상태를 확인했습니다. 화면을 열어두면 1분마다 갱신합니다." : "신청가능 권수와 도서별 상태를 확인 중입니다.";
+          : state.pendingLoaded ? "" : "신청가능 권수와 도서별 상태를 확인 중입니다.";
+      els.pendingStatus.hidden = state.pendingLoaded && !state.pendingError;
+      if (els.pendingStatus.hidden) els.pendingStatus.textContent = "";
     }
     if (els.refreshLive) {
       els.refreshLive.disabled = state.pendingLoading;
@@ -857,25 +862,25 @@
     els.myRequests.innerHTML = loadingBlock("신청 내역을 불러오는 중입니다.");
     if (els.myRequestCount) els.myRequestCount.textContent = "-";
     if (manual) showLoading("신청 내역을 새로 확인하는 중입니다.");
+    const revision = myRequestsRevision;
     try {
-      const payload = await getFromSheet({
-        action: "myRequests",
-        studentId: state.user.studentId,
-        studentName: state.user.studentName || "",
-        phone: state.user.phone
-      });
-      const entries = payload.entries || [];
+      const fetched = await fetchMyRequestEntries(state.user);
+      const entries = revision === myRequestsRevision ? fetched : state.myRequests;
       state.myRequests = entries;
       state.selectedRequestIds = new Set(Array.from(state.selectedRequestIds).filter((id) => entries.some((entry) => entry.requestId === id && canCancelRequest(entry))));
       els.myRequestCount.textContent = fmt(entries.length);
       renderMyRequests(entries);
       if (manual) toast("신청내역을 새로 확인했습니다.");
     } catch (error) {
-      state.myRequests = [];
-      state.selectedRequestIds = new Set();
-      els.myRequestCount.textContent = "0";
-      els.myRequests.innerHTML = `<p class="empty">신청 내역을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</p>`;
-      updateBulkActions();
+      if (state.myRequests.length) {
+        els.myRequestCount.textContent = fmt(state.myRequests.length);
+        renderMyRequests(state.myRequests);
+        toast("최신 신청내역을 불러오지 못했습니다. 최근 확인 결과를 표시합니다.");
+      } else {
+        els.myRequestCount.textContent = "-";
+        els.myRequests.innerHTML = `<p class="empty">신청 내역을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</p>`;
+        updateBulkActions();
+      }
     } finally {
       if (manual) hideLoading();
     }
@@ -894,7 +899,7 @@
           <p>수령 캠퍼스: ${html(entry.pickupCampus || "미지정")}</p>
           <small>${html(entry.requestedAt || "")}</small>
         </div>
-        <button type="button" class="ghost danger request-cancel" data-cancel-request="${attr(entry.requestId)}" ${cancellable ? "" : "disabled"}>신청 취소</button>
+        <button type="button" class="ghost danger request-cancel" data-cancel-request="${attr(entry.requestId)}" ${cancellable && !state.cancelling ? "" : "disabled"}>신청 취소</button>
       </article>`;
     }).join("") : `<div class="empty-state"><strong>아직 신청한 도서가 없습니다.</strong><p>도서목록에서 원하는 책을 신청해보세요.</p><a class="primary" href="catalog.html">도서목록 보기</a></div>`;
     els.myRequests.querySelectorAll("[data-request-check]").forEach((checkbox) => {
@@ -914,69 +919,92 @@
     return entry && (entry.status === "신청접수" || entry.status === "처리중");
   }
 
+  async function fetchMyRequestEntries(user, timeoutMs = READ_TIMEOUT_MS) {
+    const payload = await getFromSheet({action: "myRequests", studentId: user.studentId,
+      studentName: user.studentName || "", phone: user.phone}, timeoutMs);
+    if (!payload || !payload.ok || !Array.isArray(payload.entries)) {
+      throw new Error(appErrorMessage(payload && payload.message || "신청내역을 확인하지 못했습니다."));
+    }
+    return payload.entries;
+  }
+
+  async function cancelAndVerify(requestId) {
+    const user = state.user;
+    try {
+      const result = await postToSheet({action: "cancelApplication", requestId,
+        studentId: user.studentId, studentName: user.studentName || "", phone: user.phone});
+      if (result && result.ok === true) return;
+      if (result && result.ok === false) throw new Error(appErrorMessage(result.message || "신청을 취소하지 못했습니다."));
+      const error = new Error("취소 응답을 확인하지 못했습니다.");
+      error.code = "RESULT_UNCERTAIN";
+      throw error;
+    } catch (error) {
+      if (error.code !== "RESULT_UNCERTAIN") throw error;
+    }
+    // Never repeat a write whose response was lost. Verify the exact request instead.
+    showLoading("서버에서 취소 결과를 확인하는 중입니다.");
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (attempt) await new Promise(resolve => setTimeout(resolve, 1500));
+      try {
+        const entries = await fetchMyRequestEntries(user, 10000);
+        if (entries.some(entry => entry.requestId === requestId && entry.status === "취소")) return;
+      } catch (error) { /* A failed read cannot establish whether the write succeeded. */ }
+    }
+    throw new Error("취소 요청의 완료 여부를 아직 확인하지 못했습니다. 신청내역 새로고침으로 확인해주세요.");
+  }
+
+  function markRequestCancelled(requestId) {
+    myRequestsRevision += 1;
+    const previous = state.myRequests.find(entry => entry.requestId === requestId);
+    state.myRequests = state.myRequests.map(entry => entry.requestId === requestId ? {...entry, status: "취소"} : entry);
+    state.selectedRequestIds.delete(requestId);
+    applyPendingChange([previous], false);
+    renderMyRequests(state.myRequests);
+  }
+
   async function cancelRequest(requestId) {
-    if (!requestId || !state.user) return;
+    if (!requestId || !state.user || state.cancelling) return;
     if (!window.confirm("이 도서 신청을 취소할까요?")) return;
+    state.cancelling = true;
+    renderMyRequests(state.myRequests);
     try {
       showLoading("신청 취소를 처리하는 중입니다.");
-      const result = await postToSheet({
-        action: "cancelApplication",
-        requestId,
-        studentId: state.user.studentId,
-        studentName: state.user.studentName || "",
-        phone: state.user.phone,
-      });
-      if (!result.ok) throw new Error(appErrorMessage(result.message || "신청을 취소하지 못했습니다."));
-      applyPendingChange([state.myRequests.find((entry) => entry.requestId === requestId)], false);
+      await cancelAndVerify(requestId);
+      markRequestCancelled(requestId);
       refreshPending(false, { force: true });
       toast("신청이 취소되었습니다.");
-      await loadMyRequests(false);
     } catch (error) {
       toast(appErrorMessage(error.message || "신청을 취소하지 못했습니다."));
     } finally {
+      state.cancelling = false;
       hideLoading();
+      renderMyRequests(state.myRequests);
     }
   }
 
   async function bulkCancelRequests() {
+    if (state.cancelling) return;
     if (!state.user) return toast("로그인 후 신청을 취소할 수 있습니다.");
-    const selected = state.myRequests.filter((entry) => state.selectedRequestIds.has(entry.requestId) && canCancelRequest(entry));
+    const selected = state.myRequests.filter(entry => state.selectedRequestIds.has(entry.requestId) && canCancelRequest(entry));
     if (!selected.length) return toast("취소할 신청내역을 선택해주세요.");
     if (!window.confirm(`선택한 ${selected.length}건의 신청을 취소할까요?`)) return;
-
-    if (els.bulkCancelSelected) {
-      els.bulkCancelSelected.disabled = true;
-      els.bulkCancelSelected.dataset.loading = "true";
-      setButtonLoading(els.bulkCancelSelected, "취소 처리 중입니다.");
-    }
-    showLoading("선택한 신청을 취소하는 중입니다.");
+    state.cancelling = true;
+    renderMyRequests(state.myRequests);
     let successCount = 0;
     try {
       for (let index = 0; index < selected.length; index += 1) {
-        const result = await postToSheet({
-          action: "cancelApplication",
-          requestId: selected[index].requestId,
-          studentId: state.user.studentId,
-          studentName: state.user.studentName || "",
-          phone: state.user.phone,
-        });
-        if (!result.ok) throw new Error(appErrorMessage(result.message || "선택 신청을 취소하지 못했습니다."));
-        applyPendingChange([selected[index]], false);
+        showLoading(`선택한 신청을 취소하는 중입니다. (${index + 1}/${selected.length})`);
+        await cancelAndVerify(selected[index].requestId);
+        markRequestCancelled(selected[index].requestId);
         successCount += 1;
       }
-      state.selectedRequestIds = new Set();
       toast(`${successCount}건의 신청이 취소되었습니다.`);
-      await loadMyRequests(false);
     } catch (error) {
-      toast(appErrorMessage(error.message || "선택 신청을 취소하지 못했습니다."));
-      await loadMyRequests(false);
+      toast((successCount ? `${successCount}건 취소 완료. ` : "") + appErrorMessage(error.message || "선택 신청을 취소하지 못했습니다."));
     } finally {
+      state.cancelling = false;
       hideLoading();
-      if (els.bulkCancelSelected) {
-        delete els.bulkCancelSelected.dataset.loading;
-        setButtonLoading(els.bulkCancelSelected, "선택 신청 취소");
-      }
-      updateBulkActions();
+      renderMyRequests(state.myRequests);
       if (successCount) refreshPending(false, { force: true });
     }
   }
@@ -987,7 +1015,7 @@
     const selectedCount = cancellableIds.filter((id) => state.selectedRequestIds.has(id)).length;
     els.bulkActions.hidden = cancellableIds.length === 0;
     if (els.requestSelectionCount) els.requestSelectionCount.textContent = `${selectedCount}건 선택`;
-    if (els.bulkCancelSelected) els.bulkCancelSelected.disabled = selectedCount === 0;
+    if (els.bulkCancelSelected) els.bulkCancelSelected.disabled = state.cancelling || selectedCount === 0;
     if (els.selectAllRequests) {
       els.selectAllRequests.checked = cancellableIds.length > 0 && selectedCount === cancellableIds.length;
       els.selectAllRequests.indeterminate = selectedCount > 0 && selectedCount < cancellableIds.length;
@@ -1004,15 +1032,16 @@
     els.authArea.innerHTML = `<span class="user-chip">(${html(state.user.studentId)}) ${html(state.user.studentName)} 님</span><button type="button" class="logout-button" data-logout>로그아웃</button>`;
   }
 
-  async function getFromSheet(params) {
+  async function getFromSheet(params, timeoutMs = READ_TIMEOUT_MS) {
     const url = new URL(config.appsScriptUrl);
     Object.keys(params).forEach((key) => url.searchParams.set(key, params[key]));
-    return fetchJson(url.toString(), { cache: "no-store" });
+    return fetchJson(url.toString(), { cache: "no-store" }, timeoutMs);
   }
 
   async function postToSheet(payload) {
     const readOnly = payload.action === "savedBookMetaBatch";
-    return fetchJson(config.appsScriptUrl, { method: "POST", body: JSON.stringify(payload) }, readOnly ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS, !readOnly);
+    const timeoutMs = payload.action === "cancelApplication" ? CANCEL_TIMEOUT_MS : (readOnly ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS);
+    return fetchJson(config.appsScriptUrl, { method: "POST", body: JSON.stringify(payload) }, timeoutMs, !readOnly);
   }
 
   async function fetchJson(url, options = {}, timeoutMs = READ_TIMEOUT_MS, mutation = false) {
@@ -1024,7 +1053,11 @@
       // Keep the deadline active while reading and parsing the response body too.
       return await response.json();
     } catch (error) {
-      if (mutation) throw new Error("처리 결과를 확인하지 못했습니다. 신청 진행상황을 먼저 확인한 뒤 다시 시도해주세요.");
+      if (mutation) {
+        const uncertain = new Error("처리 결과를 확인하지 못했습니다. 신청 진행상황을 먼저 확인한 뒤 다시 시도해주세요.");
+        uncertain.code = "RESULT_UNCERTAIN";
+        throw uncertain;
+      }
       if (error.name === "AbortError") throw new Error("서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.");
       throw error;
     } finally {
