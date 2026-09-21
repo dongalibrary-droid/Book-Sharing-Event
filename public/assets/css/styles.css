@@ -194,6 +194,15 @@ body.logged-in .floating-cart { display: inline-flex; align-items: center; justi
 .spinner { width: 34px; height: 34px; display: inline-block; border: 3px solid #d9e5f3; border-top-color: var(--blue); border-radius: 50%; animation: spin .72s linear infinite; }
 .spinner.small { width: 18px; height: 18px; border-width: 2px; border-left-color: rgba(255,255,255,.42); border-bottom-color: rgba(255,255,255,.42); border-right-color: rgba(255,255,255,.42); border-top-color: #fff; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.notice-popup { width: fit-content; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); padding: 0; border: 0; border-radius: 10px; overflow: auto; background: #fff; color: var(--ink); box-shadow: var(--shadow); }
+.notice-popup::backdrop { background: rgba(0, 0, 0, .65); }
+.notice-image { min-width: min(320px, calc(100vw - 32px)); background: #111; }
+.notice-image img { display: block; width: auto; height: auto; max-width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 100px); max-height: calc(100dvh - 100px); margin: auto; object-fit: contain; }
+.notice-image img[hidden], .notice-image p[hidden] { display: none; }
+.notice-image p { max-width: 480px; margin: 0; padding: 36px 24px; color: #fff; white-space: pre-line; line-height: 1.7; }
+.notice-actions { position: sticky; bottom: 0; display: flex; justify-content: space-between; gap: 16px; min-height: 60px; padding: 8px 16px; background: #fff; }
+.notice-actions button { min-height: 44px; padding: 8px 12px; border: 0; background: transparent; color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; }
+.notice-actions button:focus-visible { outline: 3px solid var(--blue); outline-offset: -3px; border-radius: 4px; }
 .book-detail-page { display: grid; grid-template-columns: 340px minmax(0,1fr); gap: 34px; align-items: start; padding: 34px 0; }
 .detail-cover.large { min-height: 520px; position: sticky; top: 130px; }
 .detail-cover.large img { max-width: 270px; max-height: 420px; }

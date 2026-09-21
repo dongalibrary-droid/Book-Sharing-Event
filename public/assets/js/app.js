@@ -17,6 +17,11 @@
   let pendingRequest = null;
   let pendingRetryTimer = null;
   let pendingRevision = 0;
+  let operationRequest = null;
+  let operationUiState = "";
+  let dismissedPopup = "";
+  let popupIdentity = "";
+  let popupHiddenToday = null;
   const settingsStartedAt = Date.now();
   const siteDefaults = {
     SITE_TITLE: "도서 나눔 플랫폼",
@@ -44,6 +49,9 @@
     pendingLoading: false,
     pendingError: false,
     catalogReady: false,
+    operation: null,
+    operationReceivedAt: 0,
+    operationError: false,
     category: "전체",
     view: "list",
     page: 1,
@@ -76,6 +84,7 @@
     renderAuth();
     bindCommon();
     applySiteSettings();
+    startOperationRefresh();
     let initialAvailability;
     if (pageName === "catalog" || pageName === "detail") {
       // Start availability before catalog, settings and cover requests.
@@ -131,6 +140,17 @@
   }
 
   function ensureSharedUi() {
+    if (!$("noticePopup")) {
+      document.body.insertAdjacentHTML("beforeend", `
+        <dialog class="notice-popup" id="noticePopup" aria-label="도서 나눔 안내">
+          <div class="notice-image"><img id="noticePopupImage" alt="도서 나눔 안내" referrerpolicy="no-referrer" /><p id="noticePopupError" hidden></p></div>
+          <div class="notice-actions">
+            <button type="button" id="noticeHideToday">오늘 하루 안 봄</button>
+            <button type="button" id="noticeClose">닫기</button>
+          </div>
+        </dialog>
+      `);
+    }
     if (hasCart() && !document.querySelector(".floating-cart")) {
       document.body.insertAdjacentHTML("beforeend", `
         <button class="floating-cart" id="floatingCartButton" type="button" data-cart-open aria-label="장바구니 열기">
@@ -258,6 +278,21 @@
   }
 
   function bindCommon() {
+    $("noticeHideToday").addEventListener("click", () => {
+      popupHiddenToday = { identity: popupIdentity, day: operationDay() };
+      saveJson("careerBookNoticeHidden", popupHiddenToday);
+      $("noticePopup").close();
+    });
+    $("noticeClose").addEventListener("click", dismissNotice);
+    $("noticePopup").addEventListener("cancel", (event) => {
+      event.preventDefault();
+      dismissNotice();
+    });
+    $("noticePopupImage").addEventListener("error", () => {
+      $("noticePopupImage").hidden = true;
+      $("noticePopupError").hidden = false;
+      $("noticePopupError").textContent = `${state.operation?.popup.alt || "도서 나눔 안내"}\n안내 이미지를 불러오지 못했습니다.`;
+    });
     document.querySelectorAll(".brand-row a").forEach((link) => {
       link.addEventListener("click", (event) => {
         if (state.user) {
@@ -470,6 +505,112 @@
     }));
     restoreSavedCovers();
     updateSummaryCounts();
+  }
+
+  function startOperationRefresh() {
+    updateOperationUi();
+    refreshOperation();
+    // Re-evaluate known boundaries locally without waiting for another request.
+    window.setInterval(() => { if (!document.hidden) updateOperationUi(); }, 1000);
+    window.setInterval(() => { if (!document.hidden) refreshOperation(); }, 60000);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) { updateOperationUi(); refreshOperation(); }
+    });
+    window.addEventListener("focus", () => { updateOperationUi(); refreshOperation(); });
+    window.addEventListener("storage", (event) => {
+      if (event.key === "careerBookNoticeHidden") { popupHiddenToday = null; updateNoticePopup(); }
+    });
+  }
+
+  function refreshOperation() {
+    if (operationRequest) return operationRequest;
+    operationRequest = (async () => {
+      try {
+        if (!config.appsScriptUrl) throw new Error("운영 설정 연결 없음");
+        const payload = await getFromSheet({ action: "operation" });
+        if (!payload.ok || !payload.operation || !Number.isFinite(payload.operation.serverNow) ||
+            !payload.operation.application || !payload.operation.popup) throw new Error("운영 설정 확인 실패");
+        state.operation = payload.operation;
+        state.operationReceivedAt = Date.now();
+        state.operationError = false;
+      } catch (error) {
+        state.operation = null;
+        state.operationError = true;
+      }
+      updateOperationUi();
+    })().finally(() => { operationRequest = null; });
+    return operationRequest;
+  }
+
+  function operationNow() {
+    return state.operation ? state.operation.serverNow + Date.now() - state.operationReceivedAt : Date.now();
+  }
+
+  function operationDay() {
+    return new Date(operationNow() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  }
+
+  function periodActive(period, now = operationNow()) {
+    return Boolean(period && period.valid === true &&
+      (period.startsAt === null || (Number.isFinite(period.startsAt) && now >= period.startsAt)) &&
+      (period.endsAt === null || (Number.isFinite(period.endsAt) && now <= period.endsAt)));
+  }
+
+  function applicationPeriodLabel() {
+    if (!state.operation) return state.operationError ? "신청 기간 확인 필요" : "신청 기간 확인 중";
+    return periodActive(state.operation.application) ? "" : "신청 기간 아님";
+  }
+
+  function updateOperationUi() {
+    const label = applicationPeriodLabel();
+    if (operationUiState !== label) {
+      operationUiState = label;
+      if (state.catalogReady && els.bookResults) filterBooks();
+      updateActiveBookActions();
+      updateCart();
+      // Also cover detail buttons before the book data has arrived.
+      if (!state.activeBook && label) {
+        [els.detailApply, els.detailCart, els.pageDetailApply, els.pageDetailCart].filter(Boolean).forEach((button) => {
+          button.disabled = true;
+          button.textContent = label;
+        });
+      }
+    }
+    updateApplyPeriodButton();
+    updateNoticePopup();
+  }
+
+  function updateApplyPeriodButton() {
+    const button = els.applyForm?.querySelector('button[type="submit"]');
+    if (!button || button.dataset.loading) return;
+    const label = applicationPeriodLabel();
+    button.disabled = Boolean(label);
+    button.textContent = label || "신청 제출";
+  }
+
+  function updateNoticePopup() {
+    const dialog = $("noticePopup");
+    if (!dialog) return;
+    const popup = state.operation?.popup;
+    const identity = popup ? JSON.stringify([popup.imageUrl, popup.startsAt, popup.endsAt]) : "";
+    const hidden = popupHiddenToday || loadJson("careerBookNoticeHidden", null);
+    const suppressed = hidden && hidden.identity === identity && hidden.day === operationDay();
+    const visible = popup && /^https:\/\/[^\s]+$/i.test(popup.imageUrl) && periodActive(popup) && dismissedPopup !== identity && !suppressed;
+    if (!visible) { if (dialog.open) dialog.close(); return; }
+    if (popupIdentity !== identity) {
+      popupIdentity = identity;
+      const img = $("noticePopupImage");
+      img.hidden = false;
+      img.alt = popup.alt || "도서 나눔 안내";
+      $("noticePopupError").hidden = true;
+      img.src = popup.imageUrl;
+    }
+    if (!dialog.open) dialog.showModal();
+  }
+
+  function dismissNotice() {
+    dismissedPopup = popupIdentity;
+    $("noticePopup").close();
   }
 
   async function prepareInitialBooks(availability) {
@@ -701,8 +842,8 @@
         </div>
       </div>
       <div class="book-actions">
-        <button class="apply" type="button" data-apply-book="${attr(book.bookId)}" ${canApply ? "" : "disabled"}>바로 신청</button>
-        <button class="cart" type="button" data-cart-book="${attr(book.bookId)}" ${canApply ? "" : "disabled"}>장바구니</button>
+        <button class="apply" type="button" data-apply-book="${attr(book.bookId)}" ${canApply ? "" : "disabled"}>${applicationPeriodLabel() || "바로 신청"}</button>
+        <button class="cart" type="button" data-cart-book="${attr(book.bookId)}" ${canApply ? "" : "disabled"}>${applicationPeriodLabel() || "장바구니"}</button>
         <button class="preview" type="button" data-preview="${attr(book.bookId)}">미리보기</button>
         <a class="detail-link" href="detail.html?id=${encodeURIComponent(book.bookId)}">상세보기</a>
       </div>
@@ -805,6 +946,7 @@
   }
 
   function addCart(bookId) {
+    if (applicationPeriodLabel()) return toast(applicationPeriodLabel());
     if (!state.pendingLoaded) return toast("신청상태를 확인한 뒤 장바구니에 담을 수 있습니다.");
     const book = findBook(bookId);
     if (!book || hasPendingBook(book) || !available(book)) return toast("이미 신청 진행중이거나 마감된 도서입니다.");
@@ -819,6 +961,7 @@
   }
 
   function updateCart() {
+    if (els.applyCart) els.applyCart.textContent = applicationPeriodLabel() || "신청하기";
     const books = state.cart.map(findBook).filter(Boolean);
     const count = state.books.length ? books.length : state.cart.length;
     if (els.cartBooks) els.cartBooks.textContent = fmt(count);
@@ -845,6 +988,7 @@
   }
 
   function openApply(books, source) {
+    if (applicationPeriodLabel()) return toast(applicationPeriodLabel());
     if (!state.pendingLoaded) return toast("신청상태를 확인 중입니다. 잠시 후 다시 시도해주세요.");
     if (!state.user) {
       toast("로그인 후 신청할 수 있습니다.");
@@ -862,6 +1006,7 @@
 
   async function submitApplication(event) {
     event.preventDefault();
+    if (applicationPeriodLabel()) return toast(applicationPeriodLabel());
     if (!state.user) return toast("로그인 후 신청할 수 있습니다.");
     if (!config.appsScriptUrl) return toast("신청을 접수하지 못했습니다. 잠시 후 다시 시도해주세요.");
     const form = new FormData(els.applyForm);
@@ -905,6 +1050,7 @@
     } catch (error) {
       const message = appErrorMessage(error.message || "신청 접수 중 오류가 발생했습니다.");
       toast(message);
+      if (message.includes("신청 기간 아님")) await refreshOperation();
       if (isAvailabilityConflictMessage(message)) {
         await syncAvailabilityAfterConflict();
       }
@@ -912,7 +1058,7 @@
       hideLoading();
       delete button.dataset.loading;
       setButtonLoading(button, "신청 제출");
-      button.disabled = false;
+      updateApplyPeriodButton();
     }
   }
 
@@ -1198,8 +1344,8 @@
     const pending = hasPendingBook(book);
     const unknown = !state.pendingLoaded && available(book) && !pending;
     const unknownLabel = state.pendingError ? "신청상태 확인 필요" : "신청상태 확인 중";
-    const applyLabel = unknown ? unknownLabel : pending ? "신청 진행중" : available(book) ? "바로 신청" : "신청 마감";
-    const cartLabel = unknown ? unknownLabel : pending ? "신청 진행중" : available(book) ? "장바구니 담기" : "신청 마감";
+    const applyLabel = applicationPeriodLabel() || (unknown ? unknownLabel : pending ? "신청 진행중" : available(book) ? "바로 신청" : "신청 마감");
+    const cartLabel = applicationPeriodLabel() || (unknown ? unknownLabel : pending ? "신청 진행중" : available(book) ? "장바구니 담기" : "신청 마감");
     if (applyButton) {
       applyButton.disabled = !canApply;
       applyButton.textContent = applyLabel;
@@ -1296,7 +1442,7 @@
   }
 
   function canApplyBook(book) {
-    return state.pendingLoaded && available(book) && !hasPendingBook(book);
+    return !applicationPeriodLabel() && state.pendingLoaded && available(book) && !hasPendingBook(book);
   }
 
   async function openCart() {

@@ -23,6 +23,8 @@ function fixture(cache = null) {
   });
   vm.runInContext(source, context);
   const api = context.window.testApi;
+  api.state.operation = { application: { valid:true, startsAt:null, endsAt:null }, serverNow:Date.now() };
+  api.state.operationReceivedAt = Date.now();
   api.state.books = ['a','b','c'].map(bookId => ({bookId, registrationNo:'r'+bookId, title:bookId, searchText:bookId, metadata:{}}));
   api.state.catalogReady = true;
   Object.assign(api.els, {searchInput:{value:''}, sortSelect:{value:'sourceNo'}, availableOnly:{checked:false}, hidePending:{checked:false},

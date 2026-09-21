@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test": "node scripts/test-performance.cjs && node scripts/test-pickup-campus.cjs && node scripts/test-metadata.cjs && node scripts/test-metadata-all.cjs && node scripts/test-loading.cjs && node scripts/test-catalog-rendering.cjs && node scripts/test-availability.cjs && node scripts/test-cancellation.cjs && node scripts/test-initial-loading.cjs",
+    "test": "node scripts/test-performance.cjs && node scripts/test-pickup-campus.cjs && node scripts/test-metadata.cjs && node scripts/test-metadata-all.cjs && node scripts/test-loading.cjs && node scripts/test-catalog-rendering.cjs && node scripts/test-availability.cjs && node scripts/test-cancellation.cjs && node scripts/test-initial-loading.cjs && node scripts/test-operation.cjs",
     "import:metadata": "node scripts/import-book-metadata.cjs",
     "build:data": "python scripts/build-career-books.py",
     "start": "python -m http.server 8088 -d public"

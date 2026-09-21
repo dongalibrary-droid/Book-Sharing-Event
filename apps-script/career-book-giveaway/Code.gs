@@ -3,6 +3,7 @@ const CONFIG = {
   REQUEST_SHEET_NAME: "신청현황",
   USER_SHEET_NAME: "이용자",
   SETTINGS_SHEET_NAME: "설정",
+  OPERATION_SHEET_NAME: "운영",
   ALADIN_API_BASE: "https://www.aladin.co.kr/ttb/api/",
   ALADIN_VERSION: "20131101",
   META_CACHE_SECONDS: 21600,
@@ -22,6 +23,15 @@ const CONFIG = {
 const BOOK_HEADERS = ["도서ID", "등록번호", "서명", "저자", "청구기호", "소장위치", "가격", "출판년도", "도서상세URL", "ISBN13", "카테고리", "상태", "신청가능수량", "신청중수량", "확정수량", "비고", "원본번호"];
 const REQUEST_HEADERS = ["신청ID", "신청일시", "상태", "학생명", "학번", "학과", "연락처", "이메일", "신청경로", "도서ID", "등록번호", "서명", "저자", "ISBN13", "메모", "처리자", "처리일시", "수령캠퍼스"];
 const PICKUP_CAMPUSES = ["한림도서관(승학)", "부민도서관(부민)"];
+const OPERATION_HEADERS = ["설정항목", "값", "설명"];
+const DEFAULT_OPERATION = [
+  ["운영시작일시", "", "한국 시간. 예: 2026-09-29 09:00:00. 빈칸이면 시작 제한 없음"],
+  ["운영종료일시", "", "예: 2026-10-31 18:00:00. 날짜만 입력하면 해당 날짜 끝까지. 빈칸이면 종료 제한 없음"],
+  ["팝업이미지URL", "", "로그인 없이 열리는 HTTPS 이미지 주소. 빈칸이면 팝업 미노출"],
+  ["팝업시작일시", "", "한국 시간. 날짜 또는 yyyy-MM-dd HH:mm:ss. 빈칸이면 시작 제한 없음"],
+  ["팝업종료일시", "", "날짜만 입력하면 해당 날짜 끝까지. 빈칸이면 종료 제한 없음"],
+  ["팝업대체텍스트", "도서 나눔 안내", "이미지의 안내 내용을 글로 입력해주세요. 화면 읽기 프로그램과 이미지 로딩 실패 시 사용"],
+];
 const USER_HEADERS = ["학번", "성명", "휴대폰번호", "개인정보동의", "최초로그인", "최근로그인", "로그인횟수"];
 const META_HEADERS = ["도서ID", "검색기준", "표지URL", "소개", "알라딘서명", "알라딘저자", "출판사", "출판일", "ISBN13", "알라딘URL", "수집상태", "갱신일시", "재시도시각"];
 const DEFAULT_SETTINGS = [
@@ -42,6 +52,7 @@ function doGet(e) {
     if (action === "bookMeta") return json_({ ok: true, item: getBookMeta_(params) });
     if (action === "bookMetaBatch") return json_({ ok: true, items: getBookMetaBatch_(params) });
     if (action === "settings") return json_({ ok: true, settings: readPublicSettings_() });
+    if (action === "operation") return json_({ ok: true, operation: readOperation_() });
     if (action === "books") return json_({ ok: true, books: readBooks_() });
     if (action === "pending") return json_({ ok: true, entries: readPendingRequests_(params.refresh === "1") });
     if (action === "myRequests") return json_({ ok: true, entries: readMyRequests_(params) });
@@ -66,7 +77,7 @@ function doPost(e) {
 
 function setupCareerBookGiveawaySheets() {
   ensureSheets_();
-  SpreadsheetApp.getUi().alert("도서목록, 신청현황, 이용자, 설정, 도서메타 시트를 확인했습니다.");
+  SpreadsheetApp.getUi().alert("도서목록, 신청현황, 이용자, 설정, 운영, 도서메타 시트를 확인했습니다.");
 }
 
 function setAladinTtbKey() {
@@ -137,6 +148,11 @@ function submitApplication_(payload) {
   try {
     const ss = getSpreadsheet_();
     const requestSheet = ss.getSheetByName(CONFIG.REQUEST_SHEET_NAME);
+    // Check fresh sheet values under the same lock as the application write.
+    const operation = readOperation_();
+    if (!operation.application.valid || !isOperationPeriodActive_(operation.application, Date.now())) {
+      throw new Error("신청 기간 아님");
+    }
     const bookMap = getBookMap_(books);
     const pendingIds = getPendingBookIdSet_();
     const now = nowKst_();
@@ -155,6 +171,7 @@ function submitApplication_(payload) {
       rows.push([requestId, now, "신청접수", studentName, studentId, "", phone, "", source, bookId, book.registrationNo, book.title, book.author, book.isbn13 || item.isbn13 || "", memo, "", "", pickupCampus]);
     });
 
+    if (!isOperationPeriodActive_(operation.application, Date.now())) throw new Error("신청 기간 아님");
     requestSheet.getRange(requestSheet.getLastRow() + 1, 1, rows.length, REQUEST_HEADERS.length).setValues(rows);
     SpreadsheetApp.flush();
     CacheService.getScriptCache().remove("careerBookPending");
@@ -258,6 +275,51 @@ function readPublicSettings_() {
     if (value) settings[key] = normalizeTerminology_(value);
   });
   return settings;
+}
+
+function readOperation_() {
+  const settings = Object.create(null);
+  DEFAULT_OPERATION.forEach(function (row) { settings[row[0]] = row[1]; });
+  const sheet = getSpreadsheet_().getSheetByName(CONFIG.OPERATION_SHEET_NAME);
+  // Existing deployments remain open until an administrator sets a period.
+  if (sheet && sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues().forEach(function (row) {
+      const key = String(row[0] || "").trim();
+      if (Object.prototype.hasOwnProperty.call(settings, key)) settings[key] = row[1];
+    });
+  }
+  const now = Date.now();
+  const application = operationPeriod_(settings["운영시작일시"], settings["운영종료일시"]);
+  const popup = operationPeriod_(settings["팝업시작일시"], settings["팝업종료일시"]);
+  const imageUrl = String(settings["팝업이미지URL"] || "").trim();
+  popup.imageUrl = /^https:\/\/[^\s]+$/i.test(imageUrl) ? imageUrl : "";
+  popup.alt = String(settings["팝업대체텍스트"] || "도서 나눔 안내").trim();
+  return { serverNow: now, application: application, popup: popup };
+}
+
+function operationPeriod_(start, end) {
+  const startsAt = parseOperationDate_(start, false);
+  const endsAt = parseOperationDate_(end, true);
+  const valid = !isNaN(startsAt) && !isNaN(endsAt) && (startsAt === null || endsAt === null || startsAt <= endsAt);
+  return { startsAt: isNaN(startsAt) ? null : startsAt, endsAt: isNaN(endsAt) ? null : endsAt, valid: valid };
+}
+
+function parseOperationDate_(value, endOfDay) {
+  if (value instanceof Date) return value.getTime();
+  const text = String(value == null ? "" : value).trim();
+  if (!text) return null;
+  const parts = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!parts) return NaN;
+  const date = parts[1] + "-" + parts[2] + "-" + parts[3];
+  const time = parts[4] === undefined ? (endOfDay ? "23:59:59" : "00:00:00") : parts[4] + ":" + parts[5] + ":" + (parts[6] || "00");
+  const timestamp = Date.parse(date + "T" + time + "+09:00");
+  // Reject overflow dates (e.g. February 30), not just unparsable input.
+  if (!isFinite(timestamp) || Utilities.formatDate(new Date(timestamp), CONFIG.TIME_ZONE, CONFIG.DATETIME_FORMAT) !== date + " " + time) return NaN;
+  return timestamp + (endOfDay && parts[4] === undefined ? 999 : 0);
+}
+
+function isOperationPeriodActive_(period, now) {
+  return period.valid && (period.startsAt === null || now >= period.startsAt) && (period.endsAt === null || now <= period.endsAt);
 }
 
 function readPendingRequests_(forceRefresh) {
@@ -743,7 +805,29 @@ function ensureSheets_() {
   ensureSheet_(ss, CONFIG.USER_SHEET_NAME, USER_HEADERS);
   const settingsSheet = ensureSheet_(ss, CONFIG.SETTINGS_SHEET_NAME, ["설정항목", "값", "비고"]);
   ensureDefaultSettings_(settingsSheet);
+  ensureOperationSheet_(ss);
   ensureSheet_(ss, CONFIG.META_SHEET_NAME, META_HEADERS);
+}
+
+function ensureOperationSheet_(ss) {
+  const sheet = ensureSheet_(ss, CONFIG.OPERATION_SHEET_NAME, OPERATION_HEADERS);
+  const headers = sheet.getRange(1, 1, 1, 3).getDisplayValues()[0];
+  if (OPERATION_HEADERS.some(function (header, index) { return headers[index] !== header; })) {
+    throw new Error("운영 시트의 A~C열 제목은 설정항목, 값, 설명이어야 합니다. 기존 데이터를 확인해주세요.");
+  }
+  const existing = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getDisplayValues().map(function (row) { return row[0]; }) : [];
+  const missing = DEFAULT_OPERATION.filter(function (row) { return existing.indexOf(row[0]) === -1; });
+  if (missing.length) {
+    const start = sheet.getLastRow() + 1;
+    // Text keeps date-only input distinct from an explicit midnight deadline.
+    sheet.getRange(start, 2, missing.length, 1).setNumberFormat("@");
+    sheet.getRange(start, 1, missing.length, 3).setValues(missing);
+  }
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(1, 180);
+  sheet.setColumnWidth(2, 360);
+  sheet.setColumnWidth(3, 580);
+  sheet.getRange(1, 1, sheet.getLastRow(), 3).setWrap(true);
 }
 
 function ensurePickupCampusColumn_(sheet) {

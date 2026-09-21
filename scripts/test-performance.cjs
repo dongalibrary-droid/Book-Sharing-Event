@@ -69,7 +69,7 @@ const requestRows = [rh, ['r', '', '신청접수', '', '', '', '', '', '', 'b90'
 const requestSheet = {getLastRow: () => requestRows.length, getRange: (r,c,n,m) => ({ getDisplayValues: () => {
   assert.equal(locked, true); return requestRows.slice(r-1,r-1+n).map(row => row.slice(c-1,c-1+m));
 }, setValues: () => { throw new Error('unexpected write'); }})};
-context.getSpreadsheet_ = () => ({getSheetByName: name => name === '도서목록' ? sheet : requestSheet});
+context.getSpreadsheet_ = () => ({getSheetByName: name => name === '운영' ? null : name === '도서목록' ? sheet : requestSheet});
 const payload = {books: [{bookId:'b90'}], studentName:'test', studentId:'id', phone:'01012345678', pickupCampus:'한림도서관(승학)'};
 assert.throws(() => context.submitApplication_(payload), /이미 신청 진행중/);
 assert.equal(locked, false);

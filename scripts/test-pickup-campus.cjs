@@ -46,7 +46,7 @@ assert.deepEqual(data[1], oldRow);
 data[0][17] = 'existing';
 assert.throws(() => context.ensurePickupCampusColumn_(sheet), /기존 데이터/);
 data[0][17] = '수령캠퍼스';
-context.getSpreadsheet_ = () => ({ getSheetByName: () => sheet });
+context.getSpreadsheet_ = () => ({ getSheetByName: name => name === '운영' ? null : sheet });
 context.getBookMap_ = () => ({ b1: { title: 'Book 1' }, b2: { title: 'Book 2' } });
 context.getPendingBookIdSet_ = () => ({});
 context.nowKst_ = () => '2026-09-11 12:00:00';

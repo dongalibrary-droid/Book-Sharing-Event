@@ -6,7 +6,7 @@ const source = fs.readFileSync('public/assets/js/app.js', 'utf8').replace(/\}\)\
   window.testApi.catalogInit = () => {
     let rendered = false;
     let release;
-    ensureSharedUi = ensureFooter = collectElements = renderAuth = bindCommon = applySiteSettings = loadSiteSettings = updateCart = bindCatalog = renderCategories = () => {};
+    ensureSharedUi = ensureFooter = collectElements = renderAuth = bindCommon = applySiteSettings = startOperationRefresh = loadSiteSettings = updateCart = bindCatalog = renderCategories = () => {};
     loadBooks = async () => {};
     refreshPending = () => new Promise(resolve => { release = resolve; });
     withLoading = (_, task) => task();
