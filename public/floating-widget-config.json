@@ -1,24 +1,31 @@
 {
   "enabled": true,
-  "mode": "direct",
+  "mode": "researcher",
   "position": {
     "left": "24px",
-    "bottom": "48px",
+    "bottom": "36px",
     "mobileLeft": "14px",
     "mobileBottom": "calc(16px + env(safe-area-inset-bottom))"
   },
   "trigger": {
-    "label": "도서 무료나눔🥕",
-    "badge": "바로가기",
-    "image": "https://dongalibrary-droid.github.io/Book-Sharing-Event/assets/images/book-sharing-floating.png?v=177fa37"
+    "label": "누구나 연구자 경진대회",
+    "image": "https://dongalibrary-droid.github.io/Book-Sharing-Event/assets/images/researcher/researcher.png"
   },
   "items": [
     {
-      "kind": "book",
-      "label": "도서 무료나눔🥕",
-      "url": "https://dongalibrary-droid.github.io/Book-Sharing-Event/",
-      "image": "https://dongalibrary-droid.github.io/Book-Sharing-Event/assets/images/book-sharing-floating.png?v=177fa37",
-      "ariaLabel": "도서 무료나눔 바로가기"
+      "label": "대회 참가신청",
+      "url": "https://docs.google.com/forms/d/e/1FAIpQLSfuL3emvc4E-NTPlAUwzH41p7fd5_VGTDEo2Q0L-jxAgyIAtg/viewform?usp=header",
+      "image": "https://dongalibrary-droid.github.io/Book-Sharing-Event/assets/images/researcher/apply.png"
+    },
+    {
+      "label": "LMS 교육",
+      "url": "https://eclass.donga.ac.kr/courses/6a9a465672417bd5030103d9",
+      "image": "https://dongalibrary-droid.github.io/Book-Sharing-Event/assets/images/researcher/lms.png"
+    },
+    {
+      "label": "24시간 질문방",
+      "url": "https://open.kakao.com/o/ggVyTTMi",
+      "image": "https://dongalibrary-droid.github.io/Book-Sharing-Event/assets/images/researcher/chat.png"
     }
   ]
 }

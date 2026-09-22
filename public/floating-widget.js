@@ -533,11 +533,58 @@
     }
   }
 
+
+  function renderResearch(config) {
+    var previous = document.getElementById("research-widget");
+    if (previous) previous.remove();
+    var style = document.getElementById("donga-research-style") || document.createElement("style");
+    style.id = "donga-research-style";
+    style.textContent = "#research-widget, #research-widget * { box-sizing: border-box; letter-spacing: 0; }\n    #research-widget { position: fixed; left: 24px; bottom: 36px; z-index: 99998; width: 136px; }\n    #research-widget button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }\n    .research-trigger { position: relative; display: grid; justify-items: center; gap: 8px; width: 136px; padding: 0; border: 0; background: transparent; color: #163f65; }\n    .research-image { position: relative; display: grid; place-items: center; width: 104px; height: 104px; isolation: isolate; }\n    .research-image img { display: block; width: 104px; height: 104px; object-fit: contain; border: 1px solid #d5e0eb; border-radius: 8px; background: white; box-shadow: 0 4px 14px #193f641a; }\n    .research-image::before, .research-image::after { content: \"\"; position: absolute; inset: 0; z-index: -1; border: 2px solid #197cb8; border-radius: 8px; pointer-events: none; animation: research-wave 3s ease-out infinite; }\n    .research-image::after { border-color: #e34388; animation-delay: 1.5s; }\n    @keyframes research-wave { 0% { transform: scale(1); opacity: .65; border-radius: 8px; } 85%, 100% { transform: scale(1.3); opacity: 0; border-radius: 24px; } }\n    .research-label { display: block; padding: 4px 10px; font-size: 13px; font-weight: 800; line-height: 1.45; background: #fffffff0; border-radius: 6px; box-shadow: 0 3px 10px #173b550c; }\n    .research-label span { display: block; }\n    .research-toggle-mark { position: absolute; right: 9px; top: -6px; width: 26px; height: 26px; border-radius: 50%; background: #164e7c; border: 2px solid white; color: white; display: grid; place-items: center; }\n    .research-toggle-mark::before { content: \"\"; width: 7px; height: 7px; border-left: 2px solid; border-top: 2px solid; transform: translateY(2px) rotate(45deg); transition: transform .2s; }\n    [data-open=\"true\"] .research-toggle-mark::before { transform: translateY(-2px) rotate(225deg); }\n    [data-open=\"true\"] .research-image::before, [data-open=\"true\"] .research-image::after { animation-play-state: paused; opacity: 0; }\n    .research-menu { position: absolute; bottom: calc(100% + 14px); left: 0; width: 190px; max-width: calc(100vw - 40px); max-height: calc(100dvh - 216px); overflow-y: auto; padding: 4px; display: grid; gap: 6px; }\n    .research-menu[hidden] { display: none; }\n    .research-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 54px; padding: 6px 10px 6px 7px; border: 1px solid #d8e3eb; border-radius: 8px; background: #ffffffed; color: #183b56; box-shadow: 0 3px 8px #173b550c; text-align: left; animation: research-enter .24s ease-out both; }\n    .research-item:nth-child(2) { animation-delay: .045s; }\n    .research-item:nth-child(3) { animation-delay: .09s; }\n    .research-item img { width: 38px; height: 38px; object-fit: contain; border-radius: 4px; flex-shrink: 0; }\n    .research-item { text-decoration: none; }\n    .research-item span { font-size: 13px; font-weight: 700; }\n    .research-item:hover { background: #eef6fb; border-color: #6e9dbc; }\n    .research-item:last-child:hover { background: #fffbe0; border-color: #c5b756; }\n    #research-widget :is(button, a):focus-visible { outline: 3px solid #1689c1; outline-offset: 3px; }\n    @keyframes research-enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }\n    @media (max-width: 600px) {\n      .event h2 { font-size: 16px; }\n      #research-widget { left: 14px; bottom: calc(16px + env(safe-area-inset-bottom)); width: 120px; }\n      .research-trigger { width: 120px; gap: 7px; } .research-image, .research-image img { width: 88px; height: 88px; }\n      .research-label { font-size: 12px; } .research-menu { width: 180px; max-height: calc(100dvh - 182px - env(safe-area-inset-bottom)); bottom: calc(100% + 12px); }\n    }\n    @media (prefers-reduced-motion: reduce) {\n      .research-image::before, .research-image::after { animation: none; opacity: 0; }\n      .research-item { animation: none; } .research-toggle-mark::before { transition: none; }\n    }\n";
+    document.head.appendChild(style);
+    document.body.insertAdjacentHTML("beforeend", "<div id=\"research-widget\" data-open=\"false\">\n    <nav class=\"research-menu\" id=\"research-menu\" aria-label=\"누구나 연구자 경진대회 바로가기\" hidden>\n      <a class=\"research-item\" href=\"https://docs.google.com/forms/d/e/1FAIpQLSfuL3emvc4E-NTPlAUwzH41p7fd5_VGTDEo2Q0L-jxAgyIAtg/viewform?usp=header\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"assets/apply.png\" alt=\"\"><span>대회 참가신청</span></a>\n      <a class=\"research-item\" href=\"https://eclass.donga.ac.kr/courses/6a9a465672417bd5030103d9\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"assets/lms.png\" alt=\"\"><span>LMS 교육</span></a>\n      <a class=\"research-item\" href=\"https://open.kakao.com/o/ggVyTTMi\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"assets/chat.png\" alt=\"\"><span>24시간 질문방</span></a>\n    </nav>\n    <button class=\"research-trigger\" id=\"research-trigger\" type=\"button\" aria-expanded=\"false\" aria-controls=\"research-menu\" aria-label=\"누구나 연구자 경진대회 메뉴 열기\">\n      <span class=\"research-image\"><img src=\"assets/researcher.png\" alt=\"\"></span>\n      <span class=\"research-toggle-mark\" aria-hidden=\"true\"></span>\n      <span class=\"research-label\"><span>누구나 연구자</span><span>경진대회</span></span>\n    </button>\n  </div>");
+    var root = document.getElementById("research-widget");
+    root.querySelector(".research-image img").src = config.trigger.image;
+    root.querySelector(".research-label").textContent = config.trigger.label;
+    root.querySelector(".research-label").style.maxWidth = "120px";
+    root.querySelector(".research-label").style.wordBreak = "keep-all";
+    root.querySelectorAll(".research-item").forEach(function (link, index) {
+      var item = config.items[index];
+      if (!item) { link.remove(); return; }
+      link.href = item.url;
+      link.querySelector("img").src = item.image;
+      link.querySelector("span").textContent = item.label;
+    });
+
+    const widget = document.getElementById("research-widget");
+    const trigger = document.getElementById("research-trigger");
+    const menu = document.getElementById("research-menu");
+    function setOpen(open, focusFirst = false) {
+      widget.dataset.open = String(open);
+      trigger.setAttribute("aria-expanded", String(open));
+      trigger.setAttribute("aria-label", "누구나 연구자 경진대회 메뉴 " + (open ? "닫기" : "열기"));
+      menu.hidden = !open;
+      if (open && focusFirst) menu.querySelector("a").focus();
+    }
+    trigger.addEventListener("click", () => setOpen(menu.hidden));
+    trigger.addEventListener("keydown", event => {
+      if (event.key === "ArrowUp") { event.preventDefault(); setOpen(true, true); }
+    });
+    document.addEventListener("pointerdown", event => { if (!widget.contains(event.target)) setOpen(false); });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && !menu.hidden) { setOpen(false); trigger.focus(); }
+    });
+    widget.addEventListener("focusout", () => {
+      setTimeout(() => { if (!widget.contains(document.activeElement)) setOpen(false); }, 0);
+    });
+    menu.addEventListener("click", event => { if (event.target.closest("a")) setOpen(false); });
+
+  }
   function render(config) {
     var existing = document.getElementById(WIDGET_ID);
     if (existing) existing.remove();
 
     if (!config.enabled) return;
+    if (config.mode === "researcher") { renderResearch(config); return; }
     injectStyles(config);
 
     var root = document.createElement("div");
