@@ -40,3 +40,9 @@ Apps Script의 `setupCareerBookGiveawaySheets`를 실행하면 구글시트 `설
 - `SITE_EYEBROW`: 로그인 화면 상단 보조 문구
 - `SITE_DESCRIPTION`: 로그인 화면 안내 문구
 - `FOOTER_TITLE`, `FOOTER_HEADING`, `FOOTER_QUOTE`, `FOOTER_DESCRIPTION`: 하단 푸터 소개 문구
+
+## 플로팅 버튼 미리보기
+
+`public/floating-widget-demo.html`을 브라우저에서 열면 누구나 연구자 경진대회 버튼을 확인할 수 있습니다. 로컬 서버로 확인하려면 `python3 -m http.server 8089 -d public` 실행 후 `http://localhost:8089/floating-widget-demo.html`에 접속하세요.
+
+공통 설정은 `public/floating-widget-config.json`에서 관리합니다. 상대 이미지 경로는 위젯 스크립트 위치를 기준으로 해석합니다. 파일을 직접 여는 미리보기는 HTML 안의 동일한 초기 설정을 사용하므로, 설정 변경 시 파일 미리보기용 설정도 함께 수정하세요. 제목 배경 불투명도는 16%이며 글자는 파랑·보라·분홍 그라데이션입니다. 메뉴는 투명도 애니메이션으로 펼쳐지고, 화면 높이가 부족할 때만 내부 스크롤을 사용합니다.
