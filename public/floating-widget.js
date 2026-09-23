@@ -612,12 +612,19 @@
     root.querySelector(".research-label").replaceChildren(labelText);
     root.querySelector(".research-label").style.maxWidth = "120px";
     root.querySelector(".research-label").style.wordBreak = "keep-all";
-    root.querySelectorAll(".research-item").forEach(function (link, index) {
-      var item = config.items[index];
-      if (!item) { link.remove(); return; }
+    var researchMenu = root.querySelector(".research-menu");
+    var itemTemplate = researchMenu.querySelector(".research-item").cloneNode(true);
+    researchMenu.replaceChildren();
+    config.items.forEach(function (item, index) {
+      var link = itemTemplate.cloneNode(true);
       link.href = item.url;
       link.querySelector("img").src = new URL(item.image, SCRIPT_BASE_URL).href;
       link.querySelector("span").textContent = item.label;
+      link.querySelector("span").style.wordBreak = "keep-all";
+      link.querySelector("span").style.minWidth = "0";
+      link.querySelector("span").style.lineHeight = "1.4";
+      link.style.animationDelay = index * 0.045 + "s";
+      researchMenu.appendChild(link);
     });
 
     const widget = document.getElementById("research-widget");

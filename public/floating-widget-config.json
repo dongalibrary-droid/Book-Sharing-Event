@@ -24,6 +24,11 @@
       "image": "assets/images/researcher/lms.png"
     },
     {
+      "label": "포스터 작성 매뉴얼",
+      "url": "https://library.donga.ac.kr/?page_id=38142",
+      "image": "assets/images/researcher/poster-manual.png"
+    },
+    {
       "label": "24시간 질문방",
       "url": "https://open.kakao.com/o/ggVyTTMi",
       "image": "assets/images/researcher/chat.png"
