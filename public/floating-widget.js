@@ -538,6 +538,63 @@
   }
 
 
+  function playResearchIntro(root, config) {
+    if (!config.trigger.video) return;
+    var motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (motion.matches) return;
+    var frame = root.querySelector(".research-image");
+    var video = document.createElement("video");
+    video.muted = true;
+    video.defaultMuted = true;
+    video.playsInline = true;
+    video.setAttribute("muted", "");
+    video.setAttribute("playsinline", "");
+    video.setAttribute("aria-hidden", "true");
+    video.tabIndex = -1;
+    video.preload = "metadata";
+    video.poster = frame.querySelector("img").src;
+    video.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;border:1px solid #d5e0eb;border-radius:8px;background:white;pointer-events:none;opacity:0;";
+    var finished = false;
+    var timer;
+    function showImage(fade) {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      motion.removeEventListener("change", onMotionChange);
+      video.pause();
+      function removeVideo() {
+        video.removeAttribute("src");
+        video.load();
+        video.remove();
+      }
+      if (fade === true && !motion.matches) {
+        // Keep the final video frame while revealing the image underneath.
+        video.style.transition = "opacity 500ms ease-in-out";
+        video.style.opacity = "0";
+        setTimeout(removeVideo, 550);
+      } else {
+        removeVideo();
+      }
+    }
+    function onMotionChange(event) { if (event.matches) showImage(); }
+    function waitForPlayback() {
+      clearTimeout(timer);
+      timer = setTimeout(showImage, 12000);
+    }
+    video.addEventListener("playing", function () {
+      clearTimeout(timer);
+      video.style.opacity = "1";
+    });
+    video.addEventListener("waiting", waitForPlayback);
+    video.addEventListener("ended", function () { showImage(true); }, { once: true });
+    video.addEventListener("error", showImage, { once: true });
+    motion.addEventListener("change", onMotionChange);
+    frame.appendChild(video);
+    video.src = new URL(config.trigger.video, SCRIPT_BASE_URL).href;
+    waitForPlayback();
+    video.play().catch(showImage);
+  }
+
   function renderResearch(config) {
     var previous = document.getElementById("research-widget");
     if (previous) previous.remove();
@@ -549,6 +606,7 @@
     document.body.insertAdjacentHTML("beforeend", "<div id=\"research-widget\" data-open=\"false\">\n    <nav class=\"research-menu\" id=\"research-menu\" aria-label=\"누구나 연구자 경진대회 바로가기\" hidden>\n      <a class=\"research-item\" href=\"https://docs.google.com/forms/d/e/1FAIpQLSfuL3emvc4E-NTPlAUwzH41p7fd5_VGTDEo2Q0L-jxAgyIAtg/viewform?usp=header\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"assets/apply.png\" alt=\"\"><span>대회 참가신청</span></a>\n      <a class=\"research-item\" href=\"https://eclass.donga.ac.kr/courses/6a9a465672417bd5030103d9\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"assets/lms.png\" alt=\"\"><span>LMS 교육</span></a>\n      <a class=\"research-item\" href=\"https://open.kakao.com/o/ggVyTTMi\" target=\"_blank\" rel=\"noopener noreferrer\"><img src=\"assets/chat.png\" alt=\"\"><span>24시간 질문방</span></a>\n    </nav>\n    <button class=\"research-trigger\" id=\"research-trigger\" type=\"button\" aria-expanded=\"false\" aria-controls=\"research-menu\" aria-label=\"누구나 연구자 경진대회 메뉴 열기\">\n      <span class=\"research-image\"><img src=\"assets/researcher.png\" alt=\"\"></span>\n      <span class=\"research-toggle-mark\" aria-hidden=\"true\"></span>\n      <span class=\"research-label\"><span>누구나 연구자</span><span>경진대회</span></span>\n    </button>\n  </div>");
     var root = document.getElementById("research-widget");
     root.querySelector(".research-image img").src = new URL(config.trigger.image, SCRIPT_BASE_URL).href;
+    playResearchIntro(root, config);
     var labelText = document.createElement("span");
     labelText.textContent = config.trigger.label;
     root.querySelector(".research-label").replaceChildren(labelText);
