@@ -538,8 +538,19 @@
   }
 
 
+  function selectResearchVideo(trigger, now) {
+    var event = trigger.eventVideo;
+    if (event && event.src) {
+      var start = Date.parse(event.startsAt);
+      var end = Date.parse(event.endsAt);
+      if (now >= start && now < end) return event.src;
+    }
+    return trigger.video;
+  }
+
   function playResearchIntro(root, config) {
-    if (!config.trigger.video) return;
+    var videoSource = selectResearchVideo(config.trigger, Date.now());
+    if (!videoSource) return;
     var motion = window.matchMedia("(prefers-reduced-motion: reduce)");
     if (motion.matches) return;
     var frame = root.querySelector(".research-image");
@@ -590,7 +601,7 @@
     video.addEventListener("error", showImage, { once: true });
     motion.addEventListener("change", onMotionChange);
     frame.appendChild(video);
-    video.src = new URL(config.trigger.video, SCRIPT_BASE_URL).href;
+    video.src = new URL(videoSource, SCRIPT_BASE_URL).href;
     waitForPlayback();
     video.play().catch(showImage);
   }
