@@ -17,7 +17,7 @@
   shadow.querySelector('img').src = asset('trophy-video-last-frame.png');
   document.body.append(host);
   
-    const releaseAt = Date.parse('2026-10-29T00:00:00+09:00');
+    const releaseAt = Date.parse('2026-10-29T10:00:00+09:00');
     const resultUrl = 'https://dongalib1946.github.io/EveryResearcher/index.html';
     let releaseTimer;
     function updateRelease() {
