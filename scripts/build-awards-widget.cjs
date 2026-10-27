@@ -34,7 +34,7 @@ const bundle = `(function () {
   shadow.append(template.content.cloneNode(true));
   shadow.querySelector('img').src = asset('trophy-video-last-frame.png');
   document.body.append(host);
-  ${script.replace("video.src = 'intro-transparent.webm';", "video.src = asset('intro-transparent.webm');")}
+  ${script.replaceAll("'intro-transparent.webm'", "asset('intro-transparent.webm')").replaceAll("'intro-transparent-hevc.mov'", "asset('intro-transparent-hevc.mov')")}
 }());
 `;
 fs.writeFileSync(path.join(publicDir, 'awards-coming-soon.js'), bundle);
