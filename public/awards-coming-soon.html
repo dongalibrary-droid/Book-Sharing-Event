@@ -27,9 +27,7 @@
     .notice small { display: block; color: #77838b; font-size: 12px; }
     footer { border-top: 1px solid #dce4e9; color: #77838b; font-size: 12px; }
     .floating { position: fixed; left: 24px; bottom: calc(26px + env(safe-area-inset-bottom)); z-index: 100; width: 164px; text-align: center; }
-    .floating-preview { display: grid; justify-items: center; gap: 3px; color: #493024; cursor: default; }
-    .coming-soon { display: flex; align-items: center; justify-content: center; gap: 7px; width: 164px; height: 16px; color: #936547; font-size: 11px; font-weight: 800; line-height: 16px; }
-    .coming-soon::before, .coming-soon::after { content: ""; width: 16px; height: 1px; background: #c29a76; }
+    .floating-preview { display: grid; justify-items: center; gap: 0; color: #493024; cursor: default; }
     .media { position: relative; display: block; width: 140px; height: 140px; isolation: isolate; }
     .media img, .media video { display: block; width: 100%; height: 100%; object-fit: contain; }
     .media img { position: relative; z-index: 1; opacity: 1; transition: opacity .7s ease; }
@@ -65,7 +63,6 @@
       .label { width: 150px; padding: 6px 3px; }
       .label small { font-size: 10px; }
       .label strong { font-size: 17px; }
-      .coming-soon { width: 150px; font-size: 10px; }
     }
     @media (prefers-reduced-motion: reduce) { .media img, .media video { transition: none; } }
     @media (prefers-reduced-motion: reduce) { .gold-waves { display: none; } .gold-waves span { animation: none; } }
@@ -90,7 +87,6 @@
         <img src="trophy-video-last-frame.png" alt="" width="140" height="140">
         <span class="gold-waves" aria-hidden="true"><span></span><span></span><span></span></span>
       </span>
-      <span class="coming-soon" lang="en">COMING SOON</span>
       <span class="label"><small>누구나 연구자 경진대회</small><strong><time datetime="2026-10-29">10월 29일</time> 공개</strong></span>
     </div>
   </aside>
