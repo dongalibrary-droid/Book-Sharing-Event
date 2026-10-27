@@ -671,7 +671,7 @@
       var previousResearch = document.getElementById("research-widget");
       if (previousResearch) previousResearch.remove();
       var awardsScript = document.createElement("script");
-      awardsScript.src = new URL("awards-coming-soon.js?v=20261027-11", SCRIPT_BASE_URL).href;
+      awardsScript.src = new URL("awards-coming-soon.js?v=20261027-12", SCRIPT_BASE_URL).href;
       document.head.appendChild(awardsScript);
       return;
     }

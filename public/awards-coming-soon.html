@@ -42,7 +42,7 @@
     }
     .label { width: 164px; padding: 8px 4px; border: 1px solid #c9a85280; border-radius: 6px; background: #fffffff0; box-shadow: 0 3px 12px #49302412; }
     .label small { display: block; font-size: 11px; font-weight: 700; line-height: 1.6; white-space: nowrap; }
-    .label strong { display: block; margin-top: 3px; font-size: 18px; line-height: 1.4; color: #784b3d; white-space: nowrap; }
+    .label strong { display: block; margin-top: 3px; font-size: 18px; font-variant-numeric: tabular-nums; line-height: 1.4; color: #784b3d; white-space: nowrap; }
     :is(a, button):focus-visible { outline: 3px solid #247fa5; outline-offset: 5px; }
     @media (max-width: 600px) {
       .wrap { padding: 22px; }
@@ -94,7 +94,17 @@
         link.href = resultUrl;
         link.setAttribute('aria-label', '누구나 연구자 경진대회 수상 결과 확인');
       } else {
-        releaseTimer = setTimeout(updateRelease, Math.min(remaining, 60000));
+        // Use total hours so a countdown longer than one day does not wrap at 24.
+        const secondsLeft = Math.ceil(remaining / 1000);
+        const hours = String(Math.floor(secondsLeft / 3600)).padStart(2, '0');
+        const minutes = String(Math.floor(secondsLeft / 60) % 60).padStart(2, '0');
+        const seconds = String(secondsLeft % 60).padStart(2, '0');
+        document.getElementById('awards-label').textContent = `${hours}:${minutes}:${seconds} 후 공개`;
+        const link = document.getElementById('awards-link');
+        link.removeAttribute('href');
+        link.removeAttribute('aria-label');
+        // Recompute from the clock on every tick, including after a suspended tab resumes.
+        releaseTimer = setTimeout(updateRelease, remaining % 1000 || 1000);
       }
     }
     document.addEventListener('visibilitychange', updateRelease);
