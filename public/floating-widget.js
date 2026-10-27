@@ -667,6 +667,14 @@
     if (existing) existing.remove();
 
     if (!config.enabled) return;
+    if (config.mode === "awards-coming-soon") {
+      var previousResearch = document.getElementById("research-widget");
+      if (previousResearch) previousResearch.remove();
+      var awardsScript = document.createElement("script");
+      awardsScript.src = new URL("awards-coming-soon.js?v=20261027", SCRIPT_BASE_URL).href;
+      document.head.appendChild(awardsScript);
+      return;
+    }
     if (config.mode === "researcher") { renderResearch(config); return; }
     injectStyles(config);
 
