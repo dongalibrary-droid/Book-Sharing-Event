@@ -58,6 +58,26 @@
     }
     @media (prefers-reduced-motion: reduce) { .media img, .media video { transition: none; } }
     @media (prefers-reduced-motion: reduce) { .media img { animation: none; } }
+    .trophy-sheen { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+    .media .trophy-sheen img { position: static; width: 100%; height: 100%; opacity: 1; animation: none; transition: none; filter: brightness(1.65) saturate(.65); }
+    .trophy-sheen.idle-sheen { animation: idle-sheen 4.6s ease-in-out infinite; }
+    .media.is-playing .idle-sheen { display: none; }
+    @keyframes idle-sheen {
+      0% { clip-path: polygon(-50% 0, -25% 0, -50% 100%, -75% 100%); opacity: 0; }
+      15% { clip-path: polygon(25% 0, 50% 0, 25% 100%, 0% 100%); opacity: .6; }
+      32% { clip-path: polygon(95% 0, 120% 0, 95% 100%, 70% 100%); opacity: .6; }
+      48%, 100% { clip-path: polygon(150% 0, 175% 0, 150% 100%, 125% 100%); opacity: 0; }
+    }
+    .media.is-celebrating .idle-sheen { visibility: hidden; animation-play-state: paused; }
+    .media.is-celebrating > img { animation-play-state: paused; }
+    .media.is-celebrating::after { content: ""; position: absolute; inset: 4%; border: 1px solid #d9b777; border-radius: 50%; pointer-events: none; animation: hover-halo 1.2s ease-out both; }
+    @keyframes hover-halo {
+      0% { transform: scale(.86); opacity: 0; }
+      25% { opacity: .7; }
+      100% { transform: scale(1.35); opacity: 0; }
+    }
+    .floating-preview.is-celebrating .label { border-color: #b48b49; background: #fffaf0; box-shadow: 0 4px 18px #c59b4b35; }
+    @media (prefers-reduced-motion: reduce) { .idle-sheen { display: none; } .media.is-celebrating::after { display: none; } }
   </style>
 </head>
 <body>
@@ -74,9 +94,10 @@
   </main>
   <footer><div class="wrap">DONG-A UNIVERSITY LIBRARY</div></footer>
   <aside class="floating" aria-label="누구나 연구자 경진대회">
-    <a class="floating-preview" id="awards-link">
+    <a class="floating-preview" id="awards-link" target="_blank" rel="noopener noreferrer">
       <span class="media" id="media">
         <img src="trophy-video-last-frame.png" alt="" width="140" height="140">
+        <span class="trophy-sheen idle-sheen" aria-hidden="true"><img src="trophy-video-last-frame.png" alt=""></span>
       </span>
       <span class="label"><small>누구나 연구자 경진대회</small><strong id="awards-label"><time datetime="2026-10-29">10월 29일</time> 공개</strong></span>
     </a>
@@ -183,6 +204,50 @@
     reducedMotion.addEventListener('change', () => { if (reducedMotion.matches) cleanup(); });
     window.addEventListener('pagehide', () => cleanup());
     playIntro();
+    const awardsLink = document.getElementById('awards-link');
+    let celebrating = false;
+    let effectTimer;
+    let effects = [];
+    function resetCelebration() {
+      clearTimeout(effectTimer);
+      effects.forEach(effect => effect.cancel());
+      effects = [];
+      celebrating = false;
+      media.classList.remove('is-celebrating');
+      awardsLink.classList.remove('is-celebrating');
+    }
+    function celebrate() {
+      if (!awardsLink.hasAttribute('href') || celebrating) return;
+      celebrating = true;
+      if (media.querySelector('video')) { cleanup(); cleanup = () => {}; }
+      media.classList.add('is-celebrating');
+      awardsLink.classList.add('is-celebrating');
+      const motion = !reducedMotion.matches && typeof media.animate === 'function';
+      if (motion) {
+        effects.push(media.animate([
+          { transform: 'translateY(0) scale(1)' },
+          { transform: 'translateY(-5px) scale(1.045)', offset: .4 },
+          { transform: 'translateY(-5px) scale(1.045)', offset: .65 },
+          { transform: 'translateY(0) scale(1)' }
+        ], { duration: 850, easing: 'ease-in-out' }));
+
+      }
+      effectTimer = setTimeout(() => {
+        resetCelebration();
+      }, motion ? 1250 : 700);
+    }
+    awardsLink.addEventListener('pointerenter', event => {
+      if (event.pointerType === 'mouse' || event.pointerType === 'pen') celebrate();
+    });
+    awardsLink.addEventListener('focus', celebrate);
+    awardsLink.addEventListener('click', event => {
+      if (!awardsLink.hasAttribute('href')) return;
+      // Navigation stays native and immediate, even while the hover effect runs.
+      celebrate();
+    });
+    reducedMotion.addEventListener('change', resetCelebration);
+    window.addEventListener('pagehide', resetCelebration);
+
   </script>
 </body>
 </html>

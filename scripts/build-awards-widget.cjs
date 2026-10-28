@@ -32,7 +32,7 @@ const bundle = `(function () {
   const template = document.createElement('template');
   template.innerHTML = ${JSON.stringify(markup)};
   shadow.append(template.content.cloneNode(true));
-  shadow.querySelector('img').src = asset('trophy-video-last-frame.png');
+  shadow.querySelectorAll('img').forEach(image => { image.src = asset('trophy-video-last-frame.png'); });
   document.body.append(host);
   ${script.replaceAll("'intro-transparent.webm'", "asset('intro-transparent.webm')").replaceAll("'intro-transparent-hevc.mov'", "asset('intro-transparent-hevc.mov')")}
 }());
